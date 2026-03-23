@@ -255,6 +255,10 @@ See `energy_aware_compiler_proposal.md` §7 for details.
 | ML compiler backend dependencies | TVM, Glow, IREE, TFLite Micro excluded |
 | Polished CLI/UX | Proof-of-concept pipeline only |
 
+## License
+
+MIT, see [LICENSE](LICENSE).
+
 ## Links
 
 - **Repo:** https://github.com/rugbedbugg/OptiFine
