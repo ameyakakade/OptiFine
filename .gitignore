@@ -1,0 +1,7 @@
+compiler/build/
+*.o
+*.elf
+__pycache__/
+*.pyc
+.venv/
+compile_commands.json
