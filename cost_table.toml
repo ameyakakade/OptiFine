@@ -1,0 +1,14 @@
+# cost_table.toml -- every entry needs a `source` before it's treated as
+# real. Log the same source in SOURCES.md alongside the number it justifies.
+# First real task (milestone 6): replace every PLACEHOLDER with a cited
+# figure from an ATmega328P/ATmega2560 datasheet current-draw table or an
+# academic instruction-level energy characterization paper.
+
+[instructions]
+MUL     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
+ADD     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
+SUB     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
+LD_SRAM = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
+ST_SRAM = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
+MOV     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
+LDI     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
