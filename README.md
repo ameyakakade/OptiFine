@@ -4,11 +4,11 @@
 ![GitHub repo size](https://img.shields.io/github/repo-size/rugbedbugg/OptiFine?style=for-the-badge&labelColor=000000)
 ![Stars](https://img.shields.io/github/stars/rugbedbugg/OptiFine?style=for-the-badge&labelColor=000000)
 
-Compiler backend that takes an INT8-quantized neural network (PyTorch → ONNX) and compiles it to AVR machine code, selecting between candidate instruction sequences by **estimated energy cost** instead of cycle count. Validated end-to-end via Avrora (cycle-accurate AVR simulator with built-in energy monitor) - no physical hardware involved anywhere in this project.
+Compiler backend that takes IR from two sources - an INT8-quantized neural network (PyTorch → ONNX) and a fixed-size audio/DSP pipeline (64-point FFT, Q15 fixed-point) - and compiles both to AVR machine code, selecting between candidate instruction sequences by **estimated energy cost** instead of cycle count. Validated end-to-end via Avrora (cycle-accurate AVR simulator with built-in energy monitor). No physical hardware in Phase 1 (sim-only); sim-to-hardware correlation is deferred Phase 2 work.
 
 ## Status
 
-**WIP** - scaffolding stage. See `energy_aware_compiler_proposal.md` for the full build spec and milestone order; most modules are stubs (`TODO(milestone N)`) until their milestone is reached.
+**WIP** - scaffolding stage. See `energy_aware_compiler_spec_v2.md` for the full build spec and milestone order; most modules are stubs (`TODO(milestone N)`) until their milestone is reached.
 
 ## Features
 
@@ -86,6 +86,9 @@ python export_model.py --out ../models/tiny_classifier.onnx
 
 ### Compile Model (Speed vs Energy)
 
+> **Not yet implemented** — `--strategy` lands at milestone 5. Shown here as
+> the target CLI.
+
 ```bash
 # Speed-optimized (select by cycles)
 ./compiler/build/optifine models/tiny_classifier.onnx \
@@ -121,7 +124,7 @@ optifine <model.onnx> --cost-table <cost_table.toml> --out <out.s> [--strategy s
 |------|-------------|
 | `--cost-table` | Path to `cost_table.toml` (required) |
 | `--out` | Output assembly file (default: `out.s`) |
-| `--strategy` | `speed` (min cycles) or `energy` (min energy_nj) |
+| `--strategy` | `speed` (min cycles) or `energy` (min energy_nj). **Planned — not yet implemented** |
 
 ### Export Model
 
@@ -163,7 +166,7 @@ MOV      = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
 LDI      = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
 ```
 
-**Milestone 6 task**: Replace all `PLACEHOLDER` entries with cited figures from ATmega328P/ATmega2560 datasheet current-draw tables or academic instruction-level energy characterization papers.
+**Milestone 7 task**: Replace all `PLACEHOLDER` entries with cited figures from ATmega328P/ATmega2560 datasheet current-draw tables or academic instruction-level energy characterization papers. DSP-path entries (`FIXED_MUL_Q15`, `COMPLEX_ADD`) get added at milestone 4 as placeholders.
 
 ### Sources (`SOURCES.md`)
 
@@ -196,8 +199,9 @@ OptiFine/
 │   ├── src/
 │   │   ├── main.c
 │   │   ├── cost_model.c
+│   │   ├── dsp_build.c        # DSP path: hand-built IR (fixed 64-pt FFT)
 │   │   ├── emit.c
-│   │   ├── ingest.c
+│   │   ├── ingest.c           # ML path: ONNX protobuf -> IR
 │   │   ├── ir.c
 │   │   ├── locality.c
 │   │   └── codegen/
@@ -215,7 +219,7 @@ OptiFine/
 │   └── tiny_classifier.onnx   # Exported demo model
 ├── cost_table.toml            # Per-instruction energy costs (sourced)
 ├── SOURCES.md                 # Cited source for every cost entry
-├── energy_aware_compiler_proposal.md  # Full build spec
+├── energy_aware_compiler_spec_v2.md  # Full build spec
 ├── REPORT.md                  # Methodology, results, limitations
 └── README.md
 ```
@@ -237,22 +241,25 @@ Covers: IR construction, cost table loading, candidate generation correctness (v
 | # | Milestone | Status |
 |---|-----------|--------|
 | 1 | Toolchain bring-up (avr-gcc + Avrora) | ⏳ |
-| 2 | Minimal end-to-end (single Add op, 2 candidates, energy diff) | ⏳ |
+| 2 | Minimal end-to-end, both workloads (ML `Add` + DSP `Window`, 2 candidates each) | ⏳ |
 | 3 | ONNX ingestion (MatMul, Add, Relu, Requantize) | ⏳ |
-| 4 | Full instruction selection + regalloc + cost-table select | ⏳ |
-| 5 | End-to-end comparison (demo model, both strategies) | ⏳ |
-| 6 | Sourcing (cost table) + write REPORT.md | ⏳ |
+| 4 | DSP builder + fixed 64-point FFT pipeline | ⏳ |
+| 5 | Full instruction selection + regalloc + locality + cost-table select | ⏳ |
+| 6 | End-to-end comparison (both workloads × both strategies) | ⏳ |
+| 7 | Sourcing (cost table) + write REPORT.md | ⏳ |
 
-See `energy_aware_compiler_proposal.md` §7 for details.
+See `energy_aware_compiler_spec_v2.md` §8 for details.
 
-## Non-Goals (v1)
+## Non-Goals (Phase 1)
 
 | Non-Goal | Reason |
 |----------|--------|
-| Multi-ISA support (ARM Cortex-M, RISC-V) | Out of scope for v1 |
-| Physical hardware measurement | Simulated only (Avrora) |
+| Multi-ISA support (ARM Cortex-M, RISC-V) | Phase 2 |
+| Physical hardware measurement | Phase 2 (deferred, not eliminated); sim-only in Phase 1 |
+| Arbitrary-N FFT | Fixed-size only: one hardcoded length (64 points), radix-2 DIT |
+| Fingerprint hash generation | Lightweight post-processing, not the energy-relevant kernel |
 | General ONNX operator coverage | Demo model only |
-| ML compiler backend dependencies | TVM, Glow, IREE, TFLite Micro excluded |
+| ML/DSP compiler backend dependencies | TVM, Glow, IREE, TFLite Micro, CMSIS-DSP excluded |
 | Polished CLI/UX | Proof-of-concept pipeline only |
 
 ## License
@@ -262,5 +269,6 @@ MIT, see [LICENSE](LICENSE).
 ## Links
 
 - **Repo:** https://github.com/rugbedbugg/OptiFine
-- **Proposal:** `energy_aware_compiler_proposal.md`
+- **Spec:** `energy_aware_compiler_spec_v2.md`
+- **Commit guidelines:** `documents/COMMIT_GUIDELINES.md`
 - **Issues:** https://github.com/rugbedbugg/OptiFine/issues
