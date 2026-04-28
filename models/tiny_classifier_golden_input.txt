@@ -1,0 +1,11 @@
+# Fixed demo input for tiny_classifier.onnx, 16 whitespace-separated
+# decimal int8 values. Not drawn live from the calibration distribution --
+# deliberately chosen (via export/gen_golden.py's search, see that file)
+# to be a concrete input this exact model's real calibrated scales/weights
+# can carry through both Requantize stages without overflowing int8. A
+# MinMax-calibrated per-tensor scale cannot bound arbitrary future inputs
+# (see compiler/src/codegen/lower.c's lower_verify_demo_forward_pass), so
+# Phase A verifies this specific vector rather than claiming it works for
+# any input -- see REPORT.md's limitations.
+36 10 15 32 6 22 27 -22
+-36 -16 -17 30 33 -40 0 26

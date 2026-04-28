@@ -1,0 +1,5 @@
+# Independently computed (export/gen_golden.py, numpy) reference output for
+# tiny_classifier_golden_input.txt through this exact model's real calibrated
+# weights/scales. compiler/tests/test_lower.c compares the actual AVR-emitted
+# code (executed via compiler/tests/avr_interp.c) against this within +/-1 LSB.
+0 -3 18 27
