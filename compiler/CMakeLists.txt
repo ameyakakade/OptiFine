@@ -12,13 +12,21 @@ endif()
 add_executable(optifine
     src/main.c
     src/ir.c
+    src/pb_reader.c
     src/ingest.c
+    src/dsp_build.c
     src/cost_model.c
     src/locality.c
     src/emit.c
     src/codegen/candidates.c
     src/codegen/regalloc.c
     src/codegen/select.c
+    src/codegen/cost_category.c
+    src/codegen/instr_buf.c
+    src/codegen/registers.c
+    src/codegen/sram_layout.c
+    src/codegen/lower.c
+    src/codegen/program.c
 )
 
 target_include_directories(optifine PRIVATE include)

@@ -1,4 +1,5 @@
 compiler/build/
+compiler/build_check/
 *.o
 *.elf
 __pycache__/

@@ -12,6 +12,7 @@ void ir_graph_free(IrGraph *graph) {
     for (size_t i = 0; i < graph->count; i++) {
         free(graph->ops[i].inputs);
         free(graph->ops[i].output_shape);
+        free(graph->ops[i].data);
     }
     free(graph->ops);
     graph->ops = NULL;
@@ -42,7 +43,15 @@ size_t ir_graph_push(IrGraph *graph, OpKind kind,
     if (quant) {
         op->quant = *quant;
     }
+    op->data = NULL;
+    op->data_len = 0;
 
     graph->count++;
     return id;
+}
+
+void ir_op_set_data(IrGraph *graph, size_t op_id, void *data, size_t data_len) {
+    free(graph->ops[op_id].data);
+    graph->ops[op_id].data = data;
+    graph->ops[op_id].data_len = data_len;
 }

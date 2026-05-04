@@ -1,0 +1,47 @@
+/* Shared AVR register assignments for this project's codegen. These are
+ * intra-op scratch registers, live only within one op's own lowering --
+ * NOT what regalloc.c's assignment[] represents (see regalloc.h). r2 is
+ * the one exception: it is a program-global always-zero register (see
+ * lower_init_zero_reg in lower.h). */
+#ifndef OPTIFINE_CODEGEN_REGISTERS_H
+#define OPTIFINE_CODEGEN_REGISTERS_H
+
+#define REG_ZERO 2      /* always 0 after lower_init_zero_reg; carry-propagation source */
+#define REG_MAC_A 16    /* muls/mulsu require operands in r16-r31 */
+#define REG_MAC_B 17
+#define REG_ACC0 18     /* 32-bit accumulator, LSB..MSB, live across one MatMul output element */
+#define REG_ACC1 19
+#define REG_ACC2 20
+#define REG_ACC3 21
+#define REG_SIGN0 22    /* sign-extension / ReLU mask scratch */
+#define REG_SIGN1 23
+#define REG_SCRATCH0 24 /* general scratch (Const/Input byte loading, Requantize temporaries) */
+#define REG_SCRATCH1 25
+/* r3..r8: 48-bit (6-byte) product accumulator for Requantize's 32x16 wide
+ * multiply. Free (not used by any of the above). */
+#define REG_PROD_BASE 3
+#define REQUANT_PRODUCT_BYTES 6
+
+/* Registers never touched by lower_matmul's own scratch use (REG_MAC_A/B,
+ * REG_ACC0-3, REG_SIGN0/1, r0/r1) -- safe to repurpose as extra storage
+ * for the duration of one MatMul's own execution only (this is a
+ * within-one-op register cache, not cross-op residency across the whole
+ * program -- see regalloc.h's module comment for why the latter isn't
+ * attempted):
+ *   - r9-r15, r26-r31: unused anywhere in lower.c.
+ *   - r24/r25 (REG_SCRATCH0/1): used by lower_bytes/lower_output/
+ *     lower_requantize_element, but never by lower_matmul.
+ *   - r3-r8 (REG_PROD_BASE..+REQUANT_PRODUCT_BYTES): Requantize's 48-bit
+ *     product buffer. Safe too, for a different reason than the others --
+ *     it IS used elsewhere in the same program (by every Requantize op),
+ *     but never *concurrently* with a MatMul: this is a straight-line
+ *     program with no interleaving, so by the time any Requantize op
+ *     runs, every MatMul that used this pool has already finished and
+ *     stored its result to SRAM.
+ * codegen/candidates.c's cached-input MatMul candidate uses these to hold
+ * the reused activation input. 21 registers covers every MatMul in this
+ * project's graphs (largest K is 16, fc1's input) with room to spare. */
+#define MATMUL_CACHE_POOL_SIZE 21
+extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
+
+#endif /* OPTIFINE_CODEGEN_REGISTERS_H */

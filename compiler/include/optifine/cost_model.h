@@ -6,7 +6,7 @@
 #include <stddef.h>
 
 #define COST_MODEL_MAX_ENTRIES 64
-#define COST_MODEL_MNEMONIC_LEN 8
+#define COST_MODEL_MNEMONIC_LEN 16 /* longest current entry: "FIXED_MUL_Q15" */
 #define COST_MODEL_SOURCE_LEN 256
 
 typedef struct {
