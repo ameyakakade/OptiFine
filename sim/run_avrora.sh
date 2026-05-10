@@ -8,6 +8,9 @@
 #   simulate ATmega128 and state this deviation plainly in the report.
 # - The energy monitor reports per-power-mode CPU energy in Joule, so the
 #   parser (parse_report.py) converts to nJ.
+# - Avrora 1.7.115 references the long-removed java.lang.Compiler class and
+#   crashes with NoClassDefFoundError on JDK 9+. Needs a JDK 8 JVM -- point
+#   JAVA_HOME at one (this repo was validated against Zulu 8).
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then

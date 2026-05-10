@@ -3,7 +3,7 @@
 ; then executes `break` which stops Avrora's simulation.
 ; Expected final state: r16 == r18 == 0x30, mem[0x0100] == 0x30.
 
-.arch atmega328p
+.arch atmega128
 
 .section .text
 .global _start

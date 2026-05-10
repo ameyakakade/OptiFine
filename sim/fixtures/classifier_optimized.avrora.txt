@@ -1,0 +1,22 @@
+Avrora [Beta 1.7.115] - (c) 2003-2007 UCLA Compilers Group
+
+Loading sim/fixtures/classifier_optimized.elf...OK
+=={ Simulation events }=======================================================
+Node          Time   Event
+------------------------------------------------------------------------------
+==============================================================================
+Simulated time: 6018 cycles
+=={ Energy consumption results for node 0 }===================================
+Node lifetime: 6018 cycles,  7.5225E-4 seconds
+
+CPU: 1.7076150225E-5 Joule
+   Active: 1.7076150225E-5 Joule, 6018 cycles
+   Idle: 0.0 Joule, 0 cycles
+   ADC Noise Reduction: 0.0 Joule, 0 cycles
+   Power Down: 0.0 Joule, 0 cycles
+   Power Save: 0.0 Joule, 0 cycles
+   RESERVED 1: 0.0 Joule, 0 cycles
+   RESERVED 2: 0.0 Joule, 0 cycles
+   Standby: 0.0 Joule, 0 cycles
+   Extended Standby: 0.0 Joule, 0 cycles
+
