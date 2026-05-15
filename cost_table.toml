@@ -1,14 +1,32 @@
 # cost_table.toml -- every entry needs a `source` before it's treated as
-# real. Log the same source in SOURCES.md alongside the number it justifies.
-# First real task (milestone 6): replace every PLACEHOLDER with a cited
-# figure from an ATmega328P/ATmega2560 datasheet current-draw table or an
-# academic instruction-level energy characterization paper.
+# real. Full citations (URLs, page numbers, exact table figures) are in
+# SOURCES.md.
+#
+# Per spec v2 section 12 (amendment, 2026-08-26): no source available to
+# this project -- not the AVR datasheets, not the JouleTrack paper, not
+# Avrora's own energy monitor -- supports differentiating energy by
+# instruction *type* within CPU active mode. Every entry below is therefore
+# `cycles(instruction) x a single per-cycle constant`.
+#
+# Per spec v2 section 13 (amendment, 2026-08-27): the per-cycle constant is
+# calibrated to Avrora's OWN built-in ATmega128 power model (3.0V,
+# 7.5667mA active current, decompiled from avrora.jar's
+# avrora.sim.mcu.ATMega128.class), not the ATmega128 datasheet's 5V/17mA
+# row used in an earlier version of this file. Avrora is this project's
+# ground-truth benchmark -- Phase A's real end-to-end run showed the
+# datasheet-derived constant (10.625 nJ/cycle) overstated Avrora's actual
+# simulated energy by ~3.75x, even though predicted and real cycle counts
+# matched almost exactly. Recalibrating to Avrora's own assumption makes
+# the compiler's predicted energy match its own benchmark by construction.
+# See SOURCES.md for the full derivation and citation.
 
 [instructions]
-MUL     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
-ADD     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
-SUB     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
-LD_SRAM = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
-ST_SRAM = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
-MOV     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
-LDI     = { energy_nj = 0.0, source = "PLACEHOLDER -- needs sourcing" }
+ADD           = { energy_nj = 2.8375, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 1 cycle -- see SOURCES.md" }
+SUB           = { energy_nj = 2.8375, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 1 cycle -- see SOURCES.md" }
+MOV           = { energy_nj = 2.8375, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 1 cycle -- see SOURCES.md" }
+LDI           = { energy_nj = 2.8375, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 1 cycle -- see SOURCES.md" }
+MUL           = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles -- see SOURCES.md" }
+LD_SRAM       = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (LDS) -- see SOURCES.md" }
+ST_SRAM       = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (STS) -- see SOURCES.md" }
+FIXED_MUL_Q15 = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (FMULS) -- DSP path, see SOURCES.md" }
+COMPLEX_ADD   = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (2x ADD: re+re, im+im) -- DSP path, see SOURCES.md" }
