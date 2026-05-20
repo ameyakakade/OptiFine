@@ -366,3 +366,115 @@ build scope but do affect the repo:
   alone. Don't treat Phase 1 completion as "ready to submit" — it's ready
   to write up as the software contribution; the energy-trustworthiness
   argument still needs the sim-to-hardware correlation work.
+
+## 12. Amendment (2026-08-26): instruction-level energy finding + sleep-mode scheduling
+
+After milestones 1–4 were complete (real Avrora bring-up, real hand-written
+candidate-pair energy deltas, real ONNX ingestion, real DSP builder), an
+attempt to source real per-instruction energy figures for `cost_table.toml`
+(originally scoped as milestone 7) turned up a finding significant enough
+to record here rather than only in `SOURCES.md`.
+
+**Finding:** no source available to this project — not the official
+Microchip/Atmel AVR datasheets (which publish only aggregate Active/Idle/
+Power-down current vs. clock frequency, never a per-instruction table), not
+JouleTrack (a well-cited instruction-level energy paper, which found
+per-instruction current variance small relative to baseline active current
+on the processors it studied), and not Avrora's own energy monitor
+(confirmed empirically: two instruction sequences with equal cycle counts
+but different opcodes — `nop`×4 vs. `ldi`/`add`/`mov` — produced
+bit-identical simulated energy) — supports differentiating energy by
+*instruction type* within CPU active mode. Every source agrees active-mode
+energy is, in effect, `cycles × a per-cycle constant`.
+
+**Consequence:** `cost_table.toml`, sourced honestly from the datasheet's
+Active Mode Supply Current figures, will be a uniform per-cycle constant
+in Phase 1, not a differentiated per-instruction table. Under that model,
+`select()`'s energy-minimizing choice is mathematically equivalent to
+cycle-minimization — which is not vacuous (AVR's `lds`/`sts` already cost 2
+cycles vs. 1 for register ops, so cycle-aware selection still captures
+real, physical SRAM-avoidance behavior, as already demonstrated in
+milestone 2's hand-written candidate pairs) but does mean a
+"speed-optimized" and "energy-aware" build of the same op are expected to
+converge, not diverge, at this measurement granularity. State this plainly
+in `REPORT.md` rather than presenting it as a limitation to paper over —
+it's a legitimate, evidenced answer to this spec's own research question
+(section 1: "does optimizing for energy produce different code than
+optimizing for cycles").
+
+This sharpens *why* Phase 2 (sim-to-hardware correlation) matters: it is
+now an open, testable question whether real silicon exhibits
+instruction-level current variation that Avrora's power-state model simply
+doesn't capture, not just whether Avrora's aggregate numbers are roughly
+right.
+
+**Addition — sleep-mode scheduling as a second, genuinely-divergent energy
+axis.** AVR's documented power-down/sleep modes differ from Active mode by
+roughly 100–1000x in current draw (real, datasheet-cited numbers, unlike
+per-instruction variance) — this is also the reason Avrora's own authors
+built its event-queue architecture around sleep (their paper reports
+typical sensor programs sleep 96–99% of the time). A compiler that
+schedules explicit low-power sleep between compute bursts is doing
+genuine, evidenced energy-aware optimization, via a different mechanism
+than per-op candidate selection: program *structure* (when to sleep, how
+long, triggered by what) rather than instruction *choice* for a fixed
+computation.
+
+Scope for Phase 1: model a periodic trigger (timer-driven wake, run one
+inference pass over the ML or DSP pipeline, re-enter sleep) and compare a
+sleep-aware build (real AVR `sleep` instruction, sleep mode configured via
+the MCU control register) against a naive busy-wait baseline, over a
+simulated duration spanning multiple trigger cycles — not a single
+straight-line compute-then-`break` program like the existing milestone 1–2
+fixtures. This is additive to, not a replacement for, the per-op candidate
+generation work in milestone 5; both axes ship in Phase 1.
+
+**2026-08-27 update:** this scope's specific wake mechanism (watchdog-
+triggered wake from Power-down) does not hold -- Avrora has no watchdog
+timer model and no general external-interrupt injection, confirmed by a
+standalone spike hanging indefinitely rather than completing (see
+`PHASE_B_NOTES.md`). The comparison target above (sleep-aware vs.
+busy-wait, over multiple trigger cycles) still stands as the goal, but the
+*mechanism* is being re-derived spike-first against what Avrora actually
+simulates rather than assumed from general AVR knowledge -- Power-save
+mode + asynchronous Timer0 is the current viable candidate, itself found
+by spiking rather than planned in advance. Treat this phase's remaining
+work as exploratory until the mechanism is nailed down, not as executing
+a predetermined plan.
+
+## 13. Amendment (2026-08-27): cost_table.toml recalibrated to Avrora's own power model
+
+Phase A (real naive AVR codegen for `models/tiny_classifier.onnx`, the
+first end-to-end run from ONNX through real emitted assembly through a
+real `sim/run_avrora.sh` invocation) surfaced a second, independent
+finding beyond section 12's.
+
+**Finding:** `cost_table.toml`'s predicted cycle count for the compiled
+classifier matched Avrora's real simulated cycle count almost exactly
+(6129 predicted vs. 6130 simulated — the +1 is known fixed harness
+overhead, already present in `bringup_smoke.avrora.txt`), but predicted
+and simulated *energy* diverged by a factor of ~3.75x (65,120.625 nJ
+predicted vs. 17,393.951625 nJ simulated). Decompiling `avrora.jar`'s
+`avrora.sim.mcu.ATMega128.class` and `avrora.sim.energy.Energy.class`
+(via `jar xf` + `javap -v`, both part of the JDK 8 toolchain already
+required to run Avrora) found the discrepancy's exact source: Avrora's
+own built-in ATmega128 power model assumes 3.0V and 7.5667mA active
+current (2.8375 nJ/cycle), not the 5V/17mA datasheet row (10.625
+nJ/cycle) `cost_table.toml` cited at the time. `3.0V × 0.0075667A /
+8,000,000 Hz = 2.8375125 nJ/cycle` matches Avrora's real simulated energy
+divided by real simulated cycles to full floating-point precision, on two
+independently-generated programs.
+
+**Consequence:** `cost_table.toml` is recalibrated to Avrora's own
+constant (see `SOURCES.md`'s "Per-cycle energy constant" section for the
+full derivation, citation, and reproduction steps). This is a deliberate
+choice to prioritize internal consistency with this project's own
+ground-truth benchmark over datasheet fidelity to an operating point (5V)
+Avrora's simulator doesn't actually model — both figures are real,
+correctly-cited numbers describing different supply voltages, and the
+5V/17mA figure remains documented in `SOURCES.md` as a superseded value,
+not deleted. This does not affect section 12's finding (no source
+supports per-instruction-*type* differentiation within active mode) —
+that conclusion holds regardless of which per-cycle constant is used,
+since it concerns relative differentiation between opcodes at equal cycle
+counts, not the constant's absolute value.
