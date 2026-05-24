@@ -1,0 +1,6 @@
+[1;34mAvrora [1;00m[[1;34mBeta 1.7.115[1;00m] - (c) 2003-2007 UCLA Compilers Group
+
+[0;33mLoading sim/fixtures/spike_powerdown_wdt.S.elf[1;00m...[0;32mOK[1;00m
+=={ Simulation events }=======================================================
+[0;32mNode          Time   Event[1;00m
+------------------------------------------------------------------------------
