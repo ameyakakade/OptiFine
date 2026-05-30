@@ -433,7 +433,7 @@ generation work in milestone 5; both axes ship in Phase 1.
 triggered wake from Power-down) does not hold -- Avrora has no watchdog
 timer model and no general external-interrupt injection, confirmed by a
 standalone spike hanging indefinitely rather than completing (see
-`PHASE_B_NOTES.md`). The comparison target above (sleep-aware vs.
+`documents/PHASE_B_NOTES.md`). The comparison target above (sleep-aware vs.
 busy-wait, over multiple trigger cycles) still stands as the goal, but the
 *mechanism* is being re-derived spike-first against what Avrora actually
 simulates rather than assumed from general AVR knowledge -- Power-save

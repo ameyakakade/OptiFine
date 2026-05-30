@@ -1,6 +1,6 @@
 # Phase B research trail: sleep-mode scheduling
 
-Referenced from `sim/fixtures/spike_powersave_timer2.S` ("see the plan file
+Referenced from `sim/fixtures/spike_powersave_timer0.S` ("see the plan file
 for the full research trail"). This is that file.
 
 ## Why this phase is exploratory, not a fixed deliverable
@@ -64,7 +64,7 @@ injection mechanism (there is no host-side way to raise an arbitrary IRQ
 mid-simulation) -- ruling out both watchdog wake and "just inject a wake
 event" as options.
 
-### Spike 3 -- `sim/fixtures/spike_powersave_timer2.S` / `.avrora.txt`
+### Spike 3 -- `sim/fixtures/spike_powersave_timer0.S` / `.avrora.txt`
 
 Question: does Avrora simulate Power-save mode woken by an asynchronous
 Timer0 (clocked from a decoupled external source via `ASSR`), the

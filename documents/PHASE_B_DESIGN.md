@@ -117,10 +117,9 @@ allows the same classifier assembly to be embedded in both variants and
 prevents Phase B from silently becoming another instruction-selection
 comparison.
 
-The existing validated spike is retained as mechanism evidence. Its filename
-will be corrected from `spike_powersave_timer2` to
-`spike_powersave_timer0`, because ATmega128 asynchronous operation belongs
-to Timer0.
+The existing validated spike is retained as mechanism evidence and is named
+`spike_powersave_timer0`, because ATmega128 asynchronous operation uses
+Timer0.
 
 ## Metrics and analysis
 

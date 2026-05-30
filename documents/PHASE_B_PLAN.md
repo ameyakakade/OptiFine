@@ -1,6 +1,5 @@
 # Phase B Duty-Cycle Scheduling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build and evaluate matched active-wait and Power-save periodic AVR classifier programs, sweep four duty cycles, and document whether sleep scheduling adds energy savings beyond Phase A.
 
@@ -26,7 +25,7 @@
 - Create `sim/run_phase_b.py` for generation and Avrora orchestration.
 - Create `sim/compare_phase_b.py` and `sim/tests/test_compare_phase_b.py` for strict matched-pair analysis.
 - Create `sim/fixtures/phase_b/manifest.json`, generated `.S` programs, raw reports, CSV, and Markdown tables.
-- Modify `program.h/.c`, `main.c`, CMake files, `parse_report.py`, `REPORT.md`, the living spec, and `PHASE_B_NOTES.md`.
+- Modify `program.h/.c`, `main.c`, CMake files, `parse_report.py`, `REPORT.md`, the living spec, and `documents/PHASE_B_NOTES.md`.
 
 ---
 
@@ -202,7 +201,7 @@ no_overrun:
 - Generate: `sim/fixtures/phase_b/manifest.json`
 - Generate: `sim/fixtures/phase_b/*.S`
 - Generate: `sim/fixtures/phase_b/*.avrora.txt`
-- Rename: `sim/fixtures/spike_powersave_timer2.S` to `spike_powersave_timer0.S`
+- Rename the legacy Timer2-named artifact to `sim/fixtures/spike_powersave_timer0.S`
 - Rename: matching `.avrora.txt`
 
 **Interfaces:**
@@ -211,7 +210,7 @@ no_overrun:
 - [ ] **Step 1: Test dry-run enumeration.** `--dry-run` must print exactly 16 unique commands without running subprocesses.
 - [ ] **Step 2: Implement orchestration.** Use `subprocess.run` argument arrays with a 120-second timeout. Hash text between BODY markers and refuse to run a matched pair with different hashes.
 - [ ] **Step 3: Write the manifest.** Record command, timestamp, tool versions, model/input hashes, body hash, divisor, expected count `4`, policy, compute path, paths, compiler stderr, and parsed report fields.
-- [ ] **Step 4: Correct the spike name and references.** Rename Timer2 artifacts to Timer0 and update `PHASE_B_NOTES.md`; `rg "spike_powersave_timer2"` must return no matches.
+- [ ] **Step 4: Correct the spike name and references.** Rename Timer2 artifacts to Timer0 and update `documents/PHASE_B_NOTES.md`; verify the obsolete filename has no matches.
 - [ ] **Step 5: Run a prescaler-32 smoke pair.** Require termination, matching body hashes, positive Power-save cycles only in the sleep variant, correct output, equal count, and no overrun.
 - [ ] **Step 6: Run divisors `8,32,128,1024`.** Retain divisor 8 as a rejected observation if it overruns; do not replace it. Divisors 32, 128, and 1024 must produce valid pairs or be debugged before analysis.
 - [ ] **Step 7: Generate primary and 2x2 tables.** Keep rejected rows with explicit reasons.
@@ -236,7 +235,7 @@ no_overrun:
 **Files:**
 - Modify: `REPORT.md`
 - Modify: `energy_aware_compiler_spec_v2.md`
-- Modify: `PHASE_B_NOTES.md`
+- Modify: `documents/PHASE_B_NOTES.md`
 - Modify: `SOURCES.md` only for authoritative Timer0/Power-save sources actually cited.
 
 - [ ] **Step 1: Update the spec.** Record validated async Timer0 + Power-save, the matched active baseline, sweep, deadline rule, and 2x2 experiment.
