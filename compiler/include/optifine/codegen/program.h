@@ -23,6 +23,29 @@ typedef struct {
     uint32_t body_cycles;
 } ProgramCost;
 
+typedef struct {
+    double energy_nj;
+    uint32_t cycles;
+} ProgramRegionCost;
+
+/* Emits the reusable one-time classifier setup: zero-register initialization
+ * followed by OP_INPUT and OP_CONST operations. It does not emit complete-
+ * program wrapper or termination instructions. */
+int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
+                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const int8_t *demo_input, size_t demo_input_len,
+                                int use_real_candidates,
+                                FILE *out, ProgramRegionCost *out_cost);
+
+/* Emits the reusable inference operations: every operation except OP_INPUT
+ * and OP_CONST. It does not emit complete-program wrapper or termination
+ * instructions. */
+int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
+                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const int8_t *demo_input, size_t demo_input_len,
+                                int use_real_candidates,
+                                FILE *out, ProgramRegionCost *out_cost);
+
 /* Writes a complete AVR .s program for `graph` to `out`, wrapped with the
  * .arch/.section/_start:/break boilerplate. `demo_input`/`demo_input_len`
  * feed OP_INPUT (see codegen/lower.h). `use_real_candidates` selects the

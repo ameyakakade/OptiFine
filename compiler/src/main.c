@@ -1,9 +1,11 @@
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "optifine/codegen/lower.h"
+#include "optifine/codegen/periodic.h"
 #include "optifine/codegen/program.h"
 #include "optifine/codegen/regalloc.h"
 #include "optifine/codegen/sram_layout.h"
@@ -14,10 +16,34 @@
 static void usage(const char *argv0) {
     fprintf(stderr,
             "usage: %s <model.onnx> --cost-table <cost_table.toml> --out <out.s> "
-            "[--input <golden_input.txt>] [--optimized]\n"
+            "[--input <golden_input.txt>] [--optimized] "
+            "[--periodic-count N --wait-policy active|powersave --timer-prescaler N]\n"
             "  --optimized  use codegen/candidates.c's real candidate diversity "
-            "(milestone 5) instead of Phase A's naive single-candidate baseline\n",
+            "(milestone 5) instead of Phase A's naive single-candidate baseline\n"
+            "  periodic mode requires --periodic-count, --wait-policy, and "
+            "--timer-prescaler together\n",
             argv0);
+}
+
+static int parse_unsigned(const char *text, unsigned long maximum, unsigned long *out_value) {
+    char *end = NULL;
+    unsigned long value;
+
+    if (text == NULL || text[0] == '\0') {
+        return -1;
+    }
+    for (const char *digit = text; *digit != '\0'; digit++) {
+        if (*digit < '0' || *digit > '9') {
+            return -1;
+        }
+    }
+    errno = 0;
+    value = strtoul(text, &end, 10);
+    if (errno != 0 || end == text || *end != '\0' || value > maximum) {
+        return -1;
+    }
+    *out_value = value;
+    return 0;
 }
 
 /* Reads whitespace-separated decimal int8 values from `path` into a
@@ -66,6 +92,10 @@ int main(int argc, char **argv) {
     const char *out_path = "out.s";
     const char *input_path = "models/tiny_classifier_golden_input.txt";
     int use_real_candidates = 0;
+    int periodic_count_seen = 0;
+    int wait_policy_seen = 0;
+    int timer_prescaler_seen = 0;
+    PeriodicOptions periodic_options = {0};
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--cost-table") == 0 && i + 1 < argc) {
@@ -76,12 +106,54 @@ int main(int argc, char **argv) {
             input_path = argv[++i];
         } else if (strcmp(argv[i], "--optimized") == 0) {
             use_real_candidates = 1;
+        } else if (strcmp(argv[i], "--periodic-count") == 0 && i + 1 < argc) {
+            unsigned long value;
+            if (periodic_count_seen || parse_unsigned(argv[++i], UINT8_MAX, &value) != 0) {
+                usage(argv[0]);
+                return 2;
+            }
+            periodic_options.inference_count = (uint8_t)value;
+            periodic_count_seen = 1;
+        } else if (strcmp(argv[i], "--wait-policy") == 0 && i + 1 < argc) {
+            const char *policy = argv[++i];
+            if (wait_policy_seen) {
+                usage(argv[0]);
+                return 2;
+            }
+            if (strcmp(policy, "active") == 0) {
+                periodic_options.policy = WAIT_ACTIVE;
+            } else if (strcmp(policy, "powersave") == 0) {
+                periodic_options.policy = WAIT_POWER_SAVE;
+            } else {
+                usage(argv[0]);
+                return 2;
+            }
+            wait_policy_seen = 1;
+        } else if (strcmp(argv[i], "--timer-prescaler") == 0 && i + 1 < argc) {
+            unsigned long value;
+            if (timer_prescaler_seen || parse_unsigned(argv[++i], UINT16_MAX, &value) != 0) {
+                usage(argv[0]);
+                return 2;
+            }
+            periodic_options.timer_prescaler = (uint16_t)value;
+            timer_prescaler_seen = 1;
         } else if (!model_path) {
             model_path = argv[i];
         } else {
             usage(argv[0]);
             return 2;
         }
+    }
+
+    int periodic_mode = periodic_count_seen || wait_policy_seen || timer_prescaler_seen;
+    if (periodic_mode && !(periodic_count_seen && wait_policy_seen && timer_prescaler_seen)) {
+        usage(argv[0]);
+        return 2;
+    }
+    periodic_options.use_real_candidates = use_real_candidates;
+    if (periodic_mode && periodic_options_validate(&periodic_options) != 0) {
+        fprintf(stderr, "invalid periodic scheduling options\n");
+        return 2;
     }
 
     if (!model_path) {
@@ -144,12 +216,30 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    int rc;
     ProgramCost cost;
-    int rc = codegen_emit_program(&graph, &layout, &regalloc, &cost_model,
-                                   demo_input, demo_input_len, use_real_candidates, out, &cost);
+    PeriodicProgramCost periodic_cost;
+    if (periodic_mode) {
+        rc = codegen_emit_periodic_program(&graph, &layout, &regalloc, &cost_model,
+                                           demo_input, demo_input_len, &periodic_options,
+                                           out, &periodic_cost);
+    } else {
+        rc = codegen_emit_program(&graph, &layout, &regalloc, &cost_model,
+                                  demo_input, demo_input_len, use_real_candidates, out, &cost);
+    }
     fclose(out);
 
-    if (rc == 0) {
+    if (rc == 0 && periodic_mode) {
+        fprintf(stderr, "periodic policy: %s\n",
+                periodic_options.policy == WAIT_ACTIVE ? "active" : "powersave");
+        fprintf(stderr, "periodic timer prescaler: %u (Timer0 divisor)\n",
+                periodic_options.timer_prescaler);
+        fprintf(stderr, "periodic inference count: %u\n", periodic_options.inference_count);
+        fprintf(stderr, "periodic initialization predicted cost: %u cycles, %.3f nJ\n",
+                periodic_cost.initialization.cycles, periodic_cost.initialization.energy_nj);
+        fprintf(stderr, "periodic per-inference predicted compute cost: %u cycles, %.3f nJ\n",
+                periodic_cost.inference.cycles, periodic_cost.inference.energy_nj);
+    } else if (rc == 0) {
         fprintf(stderr, "prologue (const/input load): %u cycles, %.3f nJ (predicted)\n",
                 cost.prologue_cycles, cost.prologue_energy_nj);
         fprintf(stderr, "inference body: %u cycles, %.3f nJ (predicted)\n",

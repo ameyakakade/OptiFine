@@ -27,6 +27,7 @@ add_executable(optifine
     src/codegen/sram_layout.c
     src/codegen/lower.c
     src/codegen/program.c
+    src/codegen/periodic.c
 )
 
 target_include_directories(optifine PRIVATE include)
@@ -36,6 +37,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     target_compile_definitions(optifine PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    # glibc/musl split lround/llround (instr_buf.c, lower.c) into libm;
+    # MSVC's CRT provides them without a separate link, so this is
+    # conditional rather than an unconditional target_link_libraries.
+    target_link_libraries(optifine PRIVATE m)
 endif()
 
 enable_testing()
