@@ -7,6 +7,7 @@
 #include "optifine/codegen/candidates.h"
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/lower.h"
+#include "optifine/codegen/program.h"
 #include "optifine/codegen/regalloc.h"
 #include "optifine/codegen/select.h"
 #include "optifine/codegen/sram_layout.h"
@@ -65,6 +66,88 @@ static int read_int8_file(const char *path, int8_t *out, size_t max_len, size_t 
     fclose(f);
     *out_len = len;
     return 0;
+}
+
+/* Returns the complete emitted text from `stream`; the caller frees it.
+ * This works with tmpfile() without imposing a named temporary-file policy
+ * on the test environment. */
+static char *read_stream(FILE *stream) {
+    assert(fflush(stream) == 0);
+    assert(fseek(stream, 0, SEEK_END) == 0);
+    long length = ftell(stream);
+    assert(length >= 0);
+    assert(fseek(stream, 0, SEEK_SET) == 0);
+
+    char *text = malloc((size_t)length + 1);
+    assert(text != NULL);
+    assert(fread(text, 1, (size_t)length, stream) == (size_t)length);
+    text[length] = '\0';
+    return text;
+}
+
+/* Catches an accidental return to a monolithic emitter, or a periodic
+ * wrapper leaking standalone-only boilerplate into either reusable region. */
+static void assert_reusable_classifier_regions(const IrGraph *graph, const SramLayout *layout,
+                                                const RegAllocResult *regalloc,
+                                                const CostModel *cost_model,
+                                                const int8_t *demo_input,
+                                                size_t demo_input_len) {
+    FILE *init_out = tmpfile();
+    FILE *body_out = tmpfile();
+    assert(init_out != NULL);
+    assert(body_out != NULL);
+
+    ProgramRegionCost init = {0};
+    ProgramRegionCost body = {0};
+    assert(codegen_emit_initialization(graph, layout, regalloc, cost_model,
+                                       demo_input, demo_input_len, 1,
+                                       init_out, &init) == 0);
+    assert(codegen_emit_inference_body(graph, layout, regalloc, cost_model,
+                                       demo_input, demo_input_len, 1,
+                                       body_out, &body) == 0);
+    assert(init.energy_nj > 0.0 && body.energy_nj > 0.0);
+    assert(init.cycles > 0 && body.cycles > 0);
+
+    char *init_text = read_stream(init_out);
+    char *body_text = read_stream(body_out);
+    assert(strstr(init_text, "sts") != NULL);
+    assert(strstr(body_text, "muls") != NULL);
+    assert(strstr(init_text, "_start:") == NULL);
+    assert(strstr(body_text, "_start:") == NULL);
+    assert(strstr(init_text, "break") == NULL);
+    assert(strstr(body_text, "break") == NULL);
+
+    free(init_text);
+    free(body_text);
+    fclose(init_out);
+    fclose(body_out);
+}
+
+/* Catches a failed region leaving stale totals visible to a caller that
+ * reuses ProgramCost across emission attempts. */
+static void assert_program_cost_zeroed_on_region_failure(const IrGraph *graph,
+                                                          const SramLayout *layout,
+                                                          const RegAllocResult *regalloc,
+                                                          const CostModel *cost_model,
+                                                          const int8_t *demo_input,
+                                                          size_t demo_input_len) {
+    IrOp unsupported_op = graph->ops[0];
+    unsupported_op.kind = (OpKind)999;
+    IrGraph unsupported_graph = *graph;
+    unsupported_graph.ops = &unsupported_op;
+    unsupported_graph.count = 1;
+    unsupported_graph.capacity = 1;
+
+    FILE *out = tmpfile();
+    assert(out != NULL);
+    ProgramCost cost = {123.0, 456, 789.0, 1011};
+    assert(codegen_emit_program(&unsupported_graph, layout, regalloc, cost_model,
+                               demo_input, demo_input_len, 0, out, &cost) != 0);
+    assert(cost.prologue_energy_nj == 0.0);
+    assert(cost.prologue_cycles == 0);
+    assert(cost.body_energy_nj == 0.0);
+    assert(cost.body_cycles == 0);
+    fclose(out);
 }
 
 /* Runs the full 13-op graph through either lower_op directly (Phase A's
@@ -167,6 +250,11 @@ int main(int argc, char **argv) {
     size_t demo_input_len = 0;
     assert(read_int8_file(argv[3], demo_input, 64, &demo_input_len) == 0);
     assert(demo_input_len == 16);
+
+    assert_reusable_classifier_regions(&graph, &layout, &regalloc, &cost_model,
+                                       demo_input, demo_input_len);
+    assert_program_cost_zeroed_on_region_failure(&graph, &layout, &regalloc, &cost_model,
+                                                  demo_input, demo_input_len);
 
     /* This exact input was chosen (see models/tiny_classifier_golden_input.txt's
      * header) to actually pass both Requantize stages for this model's real

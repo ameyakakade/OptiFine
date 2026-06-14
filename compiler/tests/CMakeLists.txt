@@ -53,13 +53,31 @@ add_executable(test_lower test_lower.c
     ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
     ${CMAKE_SOURCE_DIR}/src/codegen/select.c
     ${CMAKE_SOURCE_DIR}/src/locality.c
+    ${CMAKE_SOURCE_DIR}/src/emit.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/program.c
 )
 target_include_directories(test_lower PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     target_compile_definitions(test_lower PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    target_link_libraries(test_lower PRIVATE m)
 endif()
 add_test(NAME test_lower COMMAND test_lower
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier.onnx
     ${CMAKE_SOURCE_DIR}/../cost_table.toml
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_input.txt
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_output.txt)
+
+add_executable(test_periodic test_periodic.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/periodic.c
+)
+target_include_directories(test_periodic PRIVATE ${CMAKE_SOURCE_DIR}/include)
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_periodic PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+add_test(NAME test_periodic COMMAND test_periodic
+    $<TARGET_FILE:optifine>
+    ${CMAKE_SOURCE_DIR}/../models/tiny_classifier.onnx
+    ${CMAKE_SOURCE_DIR}/../cost_table.toml
+    ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_input.txt)
