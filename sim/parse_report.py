@@ -33,6 +33,7 @@ STATE_RE = re.compile(
     r"^\s+([A-Za-z][\w ]*?):\s*([0-9.Ee+-]+)\s*Joule(?:,\s*(\d+)\s*cycles)?\s*$"
 )
 # "Simulated time: 8 cycles" / "Node lifetime: 8 cycles, 1.0E-6 seconds"
+SIMULATED_TIME_RE = re.compile(r"Simulated time:\s*(\d+)\s*cycles")
 LIFETIME_RE = re.compile(r"Node lifetime:\s*(\d+)\s*cycles")
 
 
@@ -54,6 +55,9 @@ class EnergyReport:
 def parse_avrora_energy_output(text: str) -> EnergyReport:
     report = EnergyReport()
     for raw_line in _strip_ansi(text).splitlines():
+        if m := SIMULATED_TIME_RE.search(raw_line):
+            report.total_cycles = int(m.group(1))
+            continue
         if m := LIFETIME_RE.search(raw_line):
             report.total_cycles = int(m.group(1))
             continue
