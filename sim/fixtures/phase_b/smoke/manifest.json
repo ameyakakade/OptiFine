@@ -1,0 +1,372 @@
+{
+  "evidence_limit": "No Avrora SRAM readback is used or claimed; terminal values are compiler/run metadata.",
+  "expected_count": 4,
+  "expected_output": [
+    0,
+    -3,
+    18,
+    27
+  ],
+  "generated_at": "2026-08-28T19:50:38+00:00",
+  "inputs": {
+    "cost_table": {
+      "path": "cost_table.toml",
+      "sha256": "c2491c08934f8c0e5ef338e4847a4909a58211654578f0c51a7eb077506a52c4"
+    },
+    "golden_output": {
+      "path": "models/tiny_classifier_golden_output.txt",
+      "sha256": "edcdb6e43ab927666cde4ecd64e7878a3e48642608eef6eeb575174cfeb43110"
+    },
+    "input": {
+      "path": "models/tiny_classifier_golden_input.txt",
+      "sha256": "1613800e3eabce7b6d912e3cea2faae8efc22993902ec01bfb7a99fd3847f153"
+    },
+    "model": {
+      "path": "models/tiny_classifier.onnx",
+      "sha256": "a596005579c51aac0a622283948f088eb6dfcc046627fb091463f987644b8c31"
+    }
+  },
+  "pairs": [
+    {
+      "body_sha256": "febd7d1e64f8ee309b0a5ffb9ab9c5301529d0a1ac342591146e7e22e3c0f73a",
+      "compute_path": "optimized",
+      "divisor": 32,
+      "rejection_reason": "simulated cycles must divide evenly by inference_count",
+      "status": "rejected"
+    }
+  ],
+  "runs": [
+    {
+      "avr_gcc": {
+        "returncode": 0,
+        "stderr": "",
+        "stdout": "",
+        "timed_out": false
+      },
+      "avrora": {
+        "returncode": 0,
+        "stderr": "",
+        "stdout": "\u001b[1;34mAvrora \u001b[1;00m[\u001b[1;34mBeta 1.7.115\u001b[1;00m] - (c) 2003-2007 UCLA Compilers Group\n\n\u001b[0;33mLoading D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_active.elf\u001b[1;00m...\u001b[0;32mOK\u001b[1;00m\n=={ Simulation events }=======================================================\n\u001b[0;32mNode          Time   Event\u001b[1;00m\n------------------------------------------------------------------------------\n==============================================================================\n\u001b[0;32mSimulated time\u001b[1;00m: \u001b[1;36m38899\u001b[1;00m cycles\n=={ Energy consumption results for node 0 }===================================\nNode lifetime: 38899 cycles,  0.004862375 seconds\n\nCPU: 1.103763987375E-4 Joule\n   Active: 1.103763987375E-4 Joule, 38899 cycles\n   Idle: 0.0 Joule, 0 cycles\n   ADC Noise Reduction: 0.0 Joule, 0 cycles\n   Power Down: 0.0 Joule, 0 cycles\n   Power Save: 0.0 Joule, 0 cycles\n   RESERVED 1: 0.0 Joule, 0 cycles\n   RESERVED 2: 0.0 Joule, 0 cycles\n   Standby: 0.0 Joule, 0 cycles\n   Extended Standby: 0.0 Joule, 0 cycles\n\n",
+        "timed_out": false
+      },
+      "body_sha256": "febd7d1e64f8ee309b0a5ffb9ab9c5301529d0a1ac342591146e7e22e3c0f73a",
+      "command": {
+        "avr_gcc": [
+          "C:\\Users\\yespa\\optifine-tools\\bin\\avr-gcc.exe",
+          "-mmcu=atmega128",
+          "-nostartfiles",
+          "-o",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_active.elf",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_active.S"
+        ],
+        "avrora": [
+          "C:\\Users\\yespa\\.jabba\\jdk\\zulu@8.0.492\\bin\\java.exe",
+          "-jar",
+          "C:\\Users\\yespa\\optifine-tools\\avrora.jar",
+          "-monitors=energy",
+          "-mcu=atmega128",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_active.elf"
+        ],
+        "compiler": [
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\build\\Debug\\optifine.exe",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\models\\tiny_classifier.onnx",
+          "--cost-table",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\cost_table.toml",
+          "--out",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_active.S",
+          "--input",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\models\\tiny_classifier_golden_input.txt",
+          "--periodic-count",
+          "4",
+          "--wait-policy",
+          "active",
+          "--timer-prescaler",
+          "32",
+          "--optimized"
+        ]
+      },
+      "compiler": {
+        "returncode": 0,
+        "stderr": "periodic policy: active\nperiodic timer prescaler: 32 (Timer0 divisor)\nperiodic inference count: 4\nperiodic initialization predicted cost: 673 cycles, 1909.637 nJ\nperiodic per-inference predicted compute cost: 5344 cycles, 15163.600 nJ\n",
+        "stdout": "",
+        "timed_out": false
+      },
+      "compiler_stderr": "periodic policy: active\nperiodic timer prescaler: 32 (Timer0 divisor)\nperiodic inference count: 4\nperiodic initialization predicted cost: 673 cycles, 1909.637 nJ\nperiodic per-inference predicted compute cost: 5344 cycles, 15163.600 nJ\n",
+      "compute_path": "optimized",
+      "divisor": 32,
+      "expected_count": 4,
+      "id": "p32_optimized_active",
+      "metadata": {
+        "body_sha256": "febd7d1e64f8ee309b0a5ffb9ab9c5301529d0a1ac342591146e7e22e3c0f73a",
+        "completed_count": 4,
+        "inference_count": 4,
+        "output": [
+          0,
+          -3,
+          18,
+          27
+        ],
+        "overrun": false,
+        "policy": "active",
+        "prescaler": 32
+      },
+      "metadata_evidence": {
+        "completed_count": "--periodic-count 4 plus emitted cpi r16, 4",
+        "output": "models/tiny_classifier_golden_output.txt for the model/input supplied to the compiler",
+        "overrun": "periodic compiler terminal metadata declares the scheduler overrun flag; no simulator memory readback",
+        "source": "compiler/run metadata; Avrora SRAM readback is not used or claimed",
+        "structural_checks": {
+          "count_limit_instruction_present": true,
+          "terminal_metadata_markers_present": {
+            "completed_count": true,
+            "output": true,
+            "overrun": true
+          }
+        }
+      },
+      "parsed_report": {
+        "component_nj": {
+          "CPU": 110376.3987375
+        },
+        "cpu_states": {
+          "ADC Noise Reduction": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Active": {
+            "cycles": 38899,
+            "nj": 110376.3987375
+          },
+          "Extended Standby": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Idle": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Power Down": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Power Save": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "RESERVED 1": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "RESERVED 2": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Standby": {
+            "cycles": 0,
+            "nj": 0.0
+          }
+        },
+        "total_cycles": 38899,
+        "total_nj": 110376.3987375
+      },
+      "paths": {
+        "assembly": "sim/fixtures/phase_b/smoke/p32_optimized_active.S",
+        "avrora_output": "sim/fixtures/phase_b/smoke/p32_optimized_active.avrora.txt",
+        "elf": "sim/fixtures/phase_b/smoke/p32_optimized_active.elf"
+      },
+      "policy": "active",
+      "prescaler": 32,
+      "rejection_reason": "simulated cycles must divide evenly by inference_count",
+      "status": "rejected",
+      "timestamp": "2026-08-28T19:50:38+00:00"
+    },
+    {
+      "avr_gcc": {
+        "returncode": 0,
+        "stderr": "",
+        "stdout": "",
+        "timed_out": false
+      },
+      "avrora": {
+        "returncode": 0,
+        "stderr": "",
+        "stdout": "\u001b[1;34mAvrora \u001b[1;00m[\u001b[1;34mBeta 1.7.115\u001b[1;00m] - (c) 2003-2007 UCLA Compilers Group\n\n\u001b[0;33mLoading D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_powersave.elf\u001b[1;00m...\u001b[0;32mOK\u001b[1;00m\n=={ Simulation events }=======================================================\n\u001b[0;32mNode          Time   Event\u001b[1;00m\n------------------------------------------------------------------------------\n==============================================================================\n\u001b[0;32mSimulated time\u001b[1;00m: \u001b[1;36m39894\u001b[1;00m cycles\n=={ Energy consumption results for node 0 }===================================\nNode lifetime: 39894 cycles,  0.00498675 seconds\n\nCPU: 6.43578273E-5 Joule\n   Active: 6.35460924375E-5 Joule, 22395 cycles\n   Idle: 0.0 Joule, 0 cycles\n   ADC Noise Reduction: 0.0 Joule, 0 cycles\n   Power Down: 0.0 Joule, 0 cycles\n   Power Save: 8.117348625E-7 Joule, 17499 cycles\n   RESERVED 1: 0.0 Joule, 0 cycles\n   RESERVED 2: 0.0 Joule, 0 cycles\n   Standby: 0.0 Joule, 0 cycles\n   Extended Standby: 0.0 Joule, 0 cycles\n\n",
+        "timed_out": false
+      },
+      "body_sha256": "febd7d1e64f8ee309b0a5ffb9ab9c5301529d0a1ac342591146e7e22e3c0f73a",
+      "command": {
+        "avr_gcc": [
+          "C:\\Users\\yespa\\optifine-tools\\bin\\avr-gcc.exe",
+          "-mmcu=atmega128",
+          "-nostartfiles",
+          "-o",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_powersave.elf",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_powersave.S"
+        ],
+        "avrora": [
+          "C:\\Users\\yespa\\.jabba\\jdk\\zulu@8.0.492\\bin\\java.exe",
+          "-jar",
+          "C:\\Users\\yespa\\optifine-tools\\avrora.jar",
+          "-monitors=energy",
+          "-mcu=atmega128",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_powersave.elf"
+        ],
+        "compiler": [
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\build\\Debug\\optifine.exe",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\models\\tiny_classifier.onnx",
+          "--cost-table",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\cost_table.toml",
+          "--out",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\sim\\fixtures\\phase_b\\smoke\\p32_optimized_powersave.S",
+          "--input",
+          "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\models\\tiny_classifier_golden_input.txt",
+          "--periodic-count",
+          "4",
+          "--wait-policy",
+          "powersave",
+          "--timer-prescaler",
+          "32",
+          "--optimized"
+        ]
+      },
+      "compiler": {
+        "returncode": 0,
+        "stderr": "periodic policy: powersave\nperiodic timer prescaler: 32 (Timer0 divisor)\nperiodic inference count: 4\nperiodic initialization predicted cost: 673 cycles, 1909.637 nJ\nperiodic per-inference predicted compute cost: 5344 cycles, 15163.600 nJ\n",
+        "stdout": "",
+        "timed_out": false
+      },
+      "compiler_stderr": "periodic policy: powersave\nperiodic timer prescaler: 32 (Timer0 divisor)\nperiodic inference count: 4\nperiodic initialization predicted cost: 673 cycles, 1909.637 nJ\nperiodic per-inference predicted compute cost: 5344 cycles, 15163.600 nJ\n",
+      "compute_path": "optimized",
+      "divisor": 32,
+      "expected_count": 4,
+      "id": "p32_optimized_powersave",
+      "metadata": {
+        "body_sha256": "febd7d1e64f8ee309b0a5ffb9ab9c5301529d0a1ac342591146e7e22e3c0f73a",
+        "completed_count": 4,
+        "inference_count": 4,
+        "output": [
+          0,
+          -3,
+          18,
+          27
+        ],
+        "overrun": false,
+        "policy": "powersave",
+        "prescaler": 32
+      },
+      "metadata_evidence": {
+        "completed_count": "--periodic-count 4 plus emitted cpi r16, 4",
+        "output": "models/tiny_classifier_golden_output.txt for the model/input supplied to the compiler",
+        "overrun": "periodic compiler terminal metadata declares the scheduler overrun flag; no simulator memory readback",
+        "source": "compiler/run metadata; Avrora SRAM readback is not used or claimed",
+        "structural_checks": {
+          "count_limit_instruction_present": true,
+          "terminal_metadata_markers_present": {
+            "completed_count": true,
+            "output": true,
+            "overrun": true
+          }
+        }
+      },
+      "parsed_report": {
+        "component_nj": {
+          "CPU": 64357.8273
+        },
+        "cpu_states": {
+          "ADC Noise Reduction": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Active": {
+            "cycles": 22395,
+            "nj": 63546.0924375
+          },
+          "Extended Standby": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Idle": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Power Down": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Power Save": {
+            "cycles": 17499,
+            "nj": 811.7348625
+          },
+          "RESERVED 1": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "RESERVED 2": {
+            "cycles": 0,
+            "nj": 0.0
+          },
+          "Standby": {
+            "cycles": 0,
+            "nj": 0.0
+          }
+        },
+        "total_cycles": 39894,
+        "total_nj": 64357.8273
+      },
+      "paths": {
+        "assembly": "sim/fixtures/phase_b/smoke/p32_optimized_powersave.S",
+        "avrora_output": "sim/fixtures/phase_b/smoke/p32_optimized_powersave.avrora.txt",
+        "elf": "sim/fixtures/phase_b/smoke/p32_optimized_powersave.elf"
+      },
+      "policy": "powersave",
+      "prescaler": 32,
+      "rejection_reason": "simulated cycles must divide evenly by inference_count",
+      "status": "rejected",
+      "timestamp": "2026-08-28T19:50:39+00:00"
+    }
+  ],
+  "schema": "phase-b-sweep-v1",
+  "tables": {
+    "primary_csv": "sim/fixtures/phase_b/smoke/primary.csv",
+    "primary_markdown": "sim/fixtures/phase_b/smoke/primary.md",
+    "two_by_two_csv": "sim/fixtures/phase_b/smoke/two_by_two.csv",
+    "two_by_two_markdown": "sim/fixtures/phase_b/smoke/two_by_two.md"
+  },
+  "target": "atmega128",
+  "timeout_seconds": 120,
+  "tools": {
+    "avr_gcc": {
+      "path": "C:\\Users\\yespa\\optifine-tools\\bin\\avr-gcc.exe",
+      "sha256": "05cac2c309f52995323b20d51e6fa4186e3c2ada91bacc472a4639dee40886eb",
+      "version_command": [
+        "C:\\Users\\yespa\\optifine-tools\\bin\\avr-gcc.exe",
+        "--version"
+      ],
+      "version_returncode": 0,
+      "version_stderr": "",
+      "version_stdout": "avr-gcc.exe (Built by ckormanyos/real-time-cpp) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+      "version_timed_out": false
+    },
+    "avrora": {
+      "path": "C:\\Users\\yespa\\optifine-tools\\avrora.jar",
+      "sha256": "016021f49d922e73df4d295c05d11fb6aeabdce11974581caadf65387eb1e3eb"
+    },
+    "compiler": {
+      "path": "D:\\_CODING\\C_C++\\OptiFine\\.worktrees\\phase-b\\build\\Debug\\optifine.exe",
+      "sha256": "92ed5e93717ef2cc6b705586702903b82ab4d6f489dd51a1388f3abdd7f5007d",
+      "version": "identified by executable SHA-256; compiler has no version CLI"
+    },
+    "java": {
+      "path": "C:\\Users\\yespa\\.jabba\\jdk\\zulu@8.0.492\\bin\\java.exe",
+      "sha256": "78e2e92b98761539c1f9f10cd88d4e0e091b38f68926d4afd89b1d402ed94d89",
+      "version_command": [
+        "C:\\Users\\yespa\\.jabba\\jdk\\zulu@8.0.492\\bin\\java.exe",
+        "-version"
+      ],
+      "version_returncode": 0,
+      "version_stderr": "openjdk version \"1.8.0_492\"\nOpenJDK Runtime Environment (Zulu 8.94.0.15-CA-win64) (build 1.8.0_492-b09)\nOpenJDK 64-Bit Server VM (Zulu 8.94.0.15-CA-win64) (build 25.492-b09, mixed mode)\n",
+      "version_stdout": "",
+      "version_timed_out": false
+    }
+  }
+}

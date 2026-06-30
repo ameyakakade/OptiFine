@@ -1,0 +1,2 @@
+compute_path,prescaler,period_cycles,inferences,active_nj,powersave_nj,saved_nj,saving_pct,nj_per_inference,active_cycles,powersave_cycles,deadline_status,output_status,status,rejection_reason
+optimized,32,,,,,,,,,,,,rejected,simulated cycles must divide evenly by inference_count
