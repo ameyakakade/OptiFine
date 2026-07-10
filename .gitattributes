@@ -1,0 +1,8 @@
+# Shell scripts must be LF -- a CRLF `#!/usr/bin/env bash` script fails to
+# parse on Linux/macOS (found empirically: sim/run_avrora.sh checked out
+# with CRLF line endings threw a bash syntax error on this project's own
+# elif branches). Every other tracked text file may still carry whatever
+# line ending Windows checkouts have used so far; this only forces the
+# one file type where the wrong ending is a functional bug, not a style
+# issue.
+*.sh text eol=lf

@@ -1,8 +1,15 @@
 compiler/build/
 compiler/build_check/
+compiler/build*/
 *.o
 *.elf
 __pycache__/
 *.pyc
 .venv/
 compile_commands.json
+
+# Downloaded/extracted third-party toolchain -- tools/setup_linux.sh
+# populates this from public releases; large binaries do not belong in git.
+tools/avrora.jar
+tools/jdk8*/
+.pytest_cache/

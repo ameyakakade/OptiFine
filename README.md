@@ -67,6 +67,37 @@ Model Export        Custom IR         AVR Target      Energy-Cost         Emit A
 | Avrora | `avrora.jar` (requires JVM) |
 | ONNX protobuf | `protoc` + `onnx.proto` (for ingestion) |
 
+The compiler itself (`compiler/`) is host C11 with no AVR dependency --
+`cmake`/a C compiler is all it needs to build and pass its CTest suite on
+Linux, macOS, or Windows. The AVR toolchain and Avrora are only needed to
+actually simulate emitted assembly (`sim/run_avrora.sh`,
+`sim/run_phase_b.py`).
+
+#### Linux toolchain setup
+
+```bash
+./tools/setup_linux.sh
+```
+
+Downloads a pinned JDK 8 (Avrora 1.7.115 crashes on JDK 9+, see
+`sim/run_avrora.sh`) and the exact `avrora-beta-1.7.115.jar` this
+project's energy constants are calibrated against (`SOURCES.md`) into
+`tools/` -- no root needed for either. `avr-gcc`/`avr-libc`/`avr-binutils`
+still need a real system package (Arch's prebuilt `avr-gcc` hardcodes its
+linker lookup to `/usr/bin/avr-ld` in a way that ignores relocated
+copies -- confirmed empirically, not assumed):
+
+```bash
+sudo pacman -S avr-gcc avr-binutils avr-libc      # Arch/Manjaro
+sudo apt install gcc-avr avr-libc binutils-avr     # Debian/Ubuntu
+sudo dnf install avr-gcc avr-libc avr-binutils     # Fedora
+```
+
+`sim/run_avrora.sh` and `sim/run_phase_b.py` both auto-discover `avr-gcc`
+(PATH, or `$AVR_GCC`), the vendored JDK 8 (or `$JAVA8_BIN`/`$JAVA_HOME`),
+and the vendored `avrora.jar` (or `$AVRORA_JAR`) in that order -- set the
+env vars to override any of them.
+
 ### Build Compiler
 
 ```bash
