@@ -1,13 +1,16 @@
 # OptiFine: Energy-Aware Code Generation for Edge ML -- Report
 
-Status: draft. Phase A (naive baseline) and milestone 5 (real candidate
-diversity + next-use register allocation) are done and produce the real
-numbers below, from the actual compiler running the actual `tiny_classifier.onnx`
-model through real Avrora. Milestone 6 (broader end-to-end comparison,
-DSP path) is not yet started. Phase B (sleep-mode scheduling) is under
-exploratory spike investigation -- not yet wired into the compiler -- see
-`PHASE_B_NOTES.md` for the research trail; this report will be extended
-once that lands.
+Status: draft. Phase A (naive baseline), milestone 5 (real candidate
+diversity + next-use register allocation), and Phase B (compiler-emitted
+sleep scheduling) are done and produce the real numbers below, from the
+actual compiler running the actual `tiny_classifier.onnx` model through
+real Avrora. Milestone 6 (broader end-to-end comparison, DSP path) is not
+yet started. `documents/PHASE_B_NOTES.md` has the exploratory spike
+research trail that preceded Phase B's implementation (which sleep modes
+Avrora can and can't simulate, and why); `documents/PHASE_B_PLAN.md` has
+the implementation task breakdown; `documents/LITERATURE_SURVEY.md` has
+the full related-work positioning summarized in this report's Phase B
+section below.
 
 ## Methodology
 
@@ -106,6 +109,71 @@ was re-checked against the same bit-exact golden-value test used to
 validate Phase A's naive baseline, not assumed correct because it "should"
 be.
 
+### Phase B: compiler-emitted sleep scheduling
+
+Phase A and milestone 5 both optimize *within* Active mode -- every
+instruction they choose between still costs `cycles x 2.8375 nJ`. Phase B
+adds a second, independent axis: whether the MCU is put to sleep between
+inferences at all. `compiler/src/codegen/periodic.c` emits two matched
+program variants around the *same* classifier body:
+
+- **Active (busy-wait) policy**: the MCU polls a tick flag in a tight
+  loop between inferences, never leaving Active mode.
+- **Power-save policy**: `ASSR.AS0` clocks Timer0 asynchronously so it
+  keeps ticking while the CPU is asleep; the MCU enters Power-save mode
+  (`MCUCR` SM2:0=011) via `cli` -> test tick -> arm `MCUCR` -> `sei` ->
+  `sleep`, with nothing emitted between `sei` and `sleep` -- the
+  standard AVR idiom that closes the flag-test/interrupt race (the
+  instruction immediately after `sei` is guaranteed to execute before
+  any pending interrupt is serviced).
+
+Both variants share one code path for everything between `; BODY BEGIN`
+and `; BODY END` -- `codegen_emit_inference_body()`, the same function
+Phase A/milestone 5 already used -- so a policy can only change *how the
+MCU waits*, never *what it computes*. `test_periodic.c` enforces this
+with a `memcmp` over the two variants' BODY regions, not just an
+assertion in prose. A shared Timer0-overflow ISR (saves/restores r16 and
+SREG, sets an `overrun` flag if a tick arrives while an inference is
+still `running`) drives both policies identically.
+
+**Timer0 prescaler sweep.** Four ATmega128 Timer0 CS02:0 divisors (8, 32,
+128, 1024) were swept, each defining a different period between wake
+events (2,048 / 8,192 / 32,768 / 262,144 cycles at the simulated 1 MHz
+clock). Before running any pair through Avrora, `sim/run_phase_b.py`
+statically rejects a divisor if the compiler's own predicted BODY cycle
+count exceeds that period -- divisor 8's period (2,048 cycles) is shorter
+than either variant's predicted body (5,456 naive / 5,344 optimized
+cycles), so it is **excluded from the primary analysis on a static
+deadline check before its numbers are trusted**, not silently folded in.
+Divisor 8 *was* still simulated -- its four raw Avrora runs are retained
+in `sim/fixtures/phase_b/two_by_two.md` as a rejected observation, per
+the project's own rule of keeping rejected rows visible with their reason
+rather than discarding them -- and those runs corroborate the static
+prediction rather than merely repeating it: the count-4 and count-5
+Avrora runs for every divisor-8 variant are byte-identical (same cycle
+count, same energy), which is exactly what happens when the program hits
+`overrun` and halts on its first tick rather than completing a 5th
+inference.
+
+**Differential (steady-state) measurement.** Every reported number is
+`E(inference_count=5) - E(inference_count=4)`, not a single raw run. This
+cancels the one-time initialization cost (stack/Timer0/ISR setup) and
+isolates the true per-inference marginal cost, including the fact that
+the active and Power-save variants have different fixed wrapper lengths
+(confirmed in the raw counts: prescaler-32 count-4 totals 39,011 active
+cycles vs. 40,006 Power-save cycles, a 995-cycle wrapper-length
+difference that the differential method makes non-confounding).
+`sim/tests/test_compare_phase_b.py` locks this in
+(`test_uses_equal_steady_state_increments_despite_995_cycle_offset`).
+
+**Validity gates**, checked before any pair's numbers are reported: equal
+invocation count between the naive/optimized-and-active/Power-save
+quartet, zero overrun, bit-exact classifier output (`[0,-3,18,27]`,
+Phase A's own golden value), and identical `body_sha256` across all four
+variants of a divisor. A pair failing any of these is marked `rejected`
+with its reason, never silently dropped (`sim/fixtures/phase_b/primary.md`,
+`two_by_two.md`, `manifest.json`).
+
 ## Results
 
 Real Avrora simulation of the compiled `tiny_classifier.onnx` (16->8->4
@@ -134,6 +202,135 @@ whose activation input is reused across a loop rather than touched once):
 | 3 | MatMul (fc1) | 5,357.200 | 2 | 5,084.800 | 272.400 |
 | 9 | MatMul (fc2) | 1,407.400 | 2 | 1,362.000 | 45.400 |
 | all others | -- | (unchanged) | 1 | (unchanged) | 0 |
+
+### Phase B results
+
+**Headline finding: Phase B is what makes Phase A's saving observable at
+all.** Under the Power-save policy, the naive-vs-optimized energy delta
+is **312.606 nJ per inference, exactly, at every accepted prescaler**:
+
+| prescaler | naive Power-save (nJ) | optimized Power-save (nJ) | delta |
+|---:|---:|---:|---:|
+| 32 | 15,814.9276 | 15,502.3217 | 312.6060 |
+| 128 | 16,954.9468 | 16,642.3409 | 312.6060 |
+| 1024 | 27,595.1260 | 27,282.5200 | 312.6060 |
+
+This is not a coincidence -- it is Phase A's 112-cycle saving (confirmed
+from the steady-state increments: naive 5,530 active cycles/inference vs.
+optimized 5,418, a 112-cycle difference, matching milestone 5's own
+Avrora-measured saving in the Results section above) times the measured
+active/Power-save per-cycle energy gap. Both per-cycle rates were
+re-derived independently from the raw CSV for this write-up (not merely
+repeated from `cost_table.toml`): active = 23,244.9024 nJ / 8,192 cycles
+= 2.8375125 nJ/cycle (matches the cost table's 2.8375 rounded constant);
+Power-save = 0.0463875 nJ/cycle, solved from the same period's naive
+active/Power-save energy and cycle split. `112 x (2.8375125 -
+0.0463875) = 112 x 2.7911250 = 312.6060 nJ`, matching the table above to
+the fourth decimal place.
+
+**Cross-platform reproduction.** All numbers above were originally
+generated on Windows. The prescaler-32 matched pair (naive vs.
+optimized, both policies, counts 4 and 5 -- the six raw observations
+behind the 312.606 nJ headline number) was independently regenerated
+from source on a second, unrelated machine (Linux) with a *different*
+compiler binary (avr-gcc 16.1.0 vs. the original run's avr-gcc 15.2.0,
+`ckormanyos/real-time-cpp` build) and a *different* JDK 8 vendor/build
+(Temurin 8u504-b01 vs. the original run's Zulu 8.0.492) -- everything
+that could plausibly vary between environments, did. Only `avrora.jar`
+was held identical, and verifiably so: its SHA-256
+(`016021f4...eb`) matches byte-for-byte between the original manifest
+record and the independently downloaded copy used for reproduction, not
+merely "the same version string."
+
+| observation | Windows (original) | Linux (reproduced) |
+|---|---:|---:|
+| optimized/active, count 4 -> 5 (nJ) | 110,376.398738 -> 133,621.301138 | 110,376.398738 -> 133,621.301138 |
+| optimized/Power-save, count 4 -> 5 (nJ) | 64,357.827300 -> 79,860.148950 | 64,357.827300 -> 79,860.148950 |
+| naive/Power-save, count 4 -> 5 (nJ) | 65,613.446700 -> 81,428.374350 | 65,613.446700 -> 81,428.374350 |
+| optimized Power-save marginal (nJ) | 15,502.32165 | 15,502.32165 |
+| naive Power-save marginal (nJ) | 15,814.92765 | 15,814.92765 |
+| **headline delta (nJ)** | **312.6060** | **312.6060** |
+
+Every figure matched to the last recorded decimal place -- not "close
+to," identical. The four regenerated `.S` files' `; BODY BEGIN`/`; BODY
+END` regions were also confirmed byte-identical to the committed
+fixtures (after normalizing line endings, since the original files are
+CRLF and the freshly generated ones are LF -- a text-encoding artifact
+of the two systems, not a content difference; `diff` after `tr -d
+'\r'` shows zero lines changed). This is offered as direct evidence
+against a specific failure mode of simulator-based results: that the
+number could be an artifact of one machine's specific toolchain build
+rather than a property of the emitted program and Avrora's power model.
+It is not the same as hardware validation (see Limitations), but it is
+stronger than a single-machine result.
+
+**Under the active (busy-wait) policy this same 112-cycle saving is
+worth exactly 0 nJ.** `active_nj` in every naive/optimized pair is
+byte-identical at a given prescaler (e.g. both read 23,244.9024 nJ at
+prescaler 32) because busy-wait energy is `period x 2.8375 nJ/cycle`,
+fully determined by the wake period alone -- finishing the classifier
+body 112 cycles sooner under busy-wait just buys 112 more polling
+cycles at the same total energy. **Phase A's instruction-selection
+saving is real but invisible without Phase B's sleep scheduling; Phase B
+is the precondition for Phase A being measurable, not a separate,
+additive percentage.**
+
+**Secondary: duty-cycle-driven scheduling saving**, comparing the
+Power-save policy against an always-Active busy-wait strawman at the
+same wake period (not a compiler-selection result -- a scheduling
+result, reported separately per the distinction above):
+
+| prescaler | period (cycles) | active_nj | powersave_nj | saved_nj | saving % | status |
+|---:|---:|---:|---:|---:|---:|---|
+| 8 | 2,048 | -- | -- | -- | -- | **rejected** (predicted body exceeds period; corroborated by identical count-4/count-5 Avrora runs on all 4 divisor-8 variants) |
+| 32 | 8,192 | 23,244.90 | 15,502.32 (optimized) | 7,742.58 | 33.31% | accepted |
+| 128 | 32,768 | 92,979.61 | 16,642.34 (optimized) | 76,337.27 | 82.10% | accepted |
+| 1024 | 262,144 | 743,836.88 | 27,282.52 (optimized) | 716,554.36 | 96.33% | accepted |
+
+(Full 4x2x2 matrix -- both compute paths, both policies, counts 4 and 5
+-- in `sim/fixtures/phase_b/two_by_two.md`; raw Avrora output per run in
+`sim/fixtures/phase_b/*.avrora.txt`; provenance/hashes in
+`sim/fixtures/phase_b/manifest.json`.)
+
+This saving percentage is duty-cycle-parameterized -- it is a property of
+*how long the MCU chooses to sleep between wake events*, and approaches
+100% as the period grows, not a fixed number this project can claim as
+"the" saving. It is reported here as the scheduling-level result it is,
+kept explicitly separate from the 312.606 nJ compiler-attributable result
+above.
+
+#### Relation to the TinyML "latency is a perfect proxy for energy" claim
+
+Heim, Biri, Qu, and Thiele (arXiv:2104.10645, 2021) measured inference
+energy on ARM Cortex-M boards and found near-perfect latency/energy
+correlation (r = 0.9946 whole-network, r = 0.9995 per-layer), concluding
+that "the inference latency is a perfect proxy for the energy
+consumption of the investigated MCUs" and that latency-optimization
+results "also apply to energy consumption." That claim holds *within
+Active mode*, and Phase A/milestone 5 agree with it: this project's own
+energy model there reduces to `cycles x 2.8375 nJ`, so Phase A's ~1.83%
+energy saving is mathematically identical to a cycle-count saving --
+exactly what Heim et al.'s regime predicts, and this project does not
+contest that.
+
+Phase B is where the claim breaks, and the 312.606 nJ / 0 nJ contrast
+above is the direct evidence: two variants (naive vs. optimized under
+busy-wait) share the *same* absolute latency between wake events (both
+still take the full 8,192-cycle period to reach the next tick) yet
+differ in energy by 0 nJ, while the same two variants under Power-save
+differ in energy by 312.606 nJ despite an even smaller latency
+difference once idle time is excluded. Once a sleep state exists below
+Active, cycles stop being a proxy for energy, because a Power-save cycle
+and an Active cycle cost 2.7911 nJ apart (a ~61.2x ratio, decompiled from
+Avrora's own `ATMega128.class`/`Energy.class`, see `SOURCES.md`) --
+elapsed latency alone cannot distinguish which kind of cycle was spent.
+This is a scope objection, not a numbers dispute: Heim et al.'s Cortex-M
+benchmark never left Active mode, so their model has no term for a
+below-Active state; ATmega128, like nearly all MCUs, exposes one. The
+full comparison, including why this is a fair, non-strawman contention
+and how it relates to prior compiler-directed sleep-scheduling and
+instruction-level-energy work, is in `documents/LITERATURE_SURVEY.md`
+section 1.
 
 ## Limitations
 
@@ -174,3 +371,35 @@ whose activation input is reused across a loop rather than touched once):
   rather than having their own cited AVR Instruction Set Manual section
   numbers -- numerically inert (see `SOURCES.md`) but a traceability gap
   for a fully rigorous write-up, deferred to milestone 7's sourcing pass.
+- **Phase B has no physical-hardware correlation.** All Power-save/Timer0
+  behavior is Avrora's simulated model; Avrora has no Watchdog Timer
+  implementation at all (confirmed via `jar tf avrora.jar | grep -i
+  watchdog` returning zero matches, and empirically by a Power-down +
+  watchdog spike hanging indefinitely -- see `documents/PHASE_B_NOTES.md`),
+  so this project cannot claim Power-down mode is simulatable here, only
+  Idle and Power-save, and only Power-save is used for the reported
+  numbers.
+- **The deadline/overrun check is compiler-side static prediction plus
+  Avrora's own reported cycle/state counts, not an in-simulation SRAM
+  readback of the program's own `completed`/`overrun` bytes.** Divisor
+  8's rejection is corroborated by external evidence (identical count-4
+  and count-5 runs, consistent with an early halt) rather than by reading
+  the emitted `overrun` flag back out of simulated memory; no claim is
+  made beyond what `manifest.json`'s `evidence_limit` field states.
+- **Single MCU, single model, single input, four prescalers.** No claim
+  is made about behavior across other AVR chips, sleep-mode
+  combinations, model architectures, or workloads with irregular
+  (non-periodic) trigger patterns -- Phase B's saving formula
+  (`saving ~= 0.984 x idle_fraction`, `documents/LITERATURE_SURVEY.md`
+  section 1.3) is specific to this project's calibrated
+  active/Power-save current ratio.
+- **`sim/run_phase_b.py`'s reproduction path hard-gates on a recorded
+  `avr-gcc` binary SHA-256**, which will legitimately differ on any
+  machine other than the one that generated `manifest.json` (confirmed:
+  two of this project's own Python regression tests fail on a from-scratch
+  Linux checkout with no bundled `avr-gcc`, for exactly this reason, not
+  a code defect). This is a real reproducibility gap in the *automated*
+  reproduction script for an artifact-evaluation reviewer on a different
+  machine, not yet fixed -- distinct from whether the numbers themselves
+  replicate cross-platform, which they do (see "Cross-platform
+  reproduction" under Phase B results above).
