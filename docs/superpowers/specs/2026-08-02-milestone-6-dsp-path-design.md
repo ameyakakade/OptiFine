@@ -205,3 +205,70 @@ Same shape as Phase A/B's existing results:
   sqrt routines + peak scan, fully unrolled) -- expected to fit AVR flash
   comfortably (128KB) but worth a sanity check on `.elf` size once the
   first full build compiles.
+
+## Amendment (2026-08-03): Q15 multiply is not one `fmuls`, and three more gaps found in planning
+
+Found while writing the implementation plan, before any code was written --
+folded in here rather than left as silent plan content, since each one
+changes what this spec's Architecture/Per-op sections said would happen.
+
+1. **`fmuls` is 8x8-bit, not 16x16.** This spec's Per-op section said
+   "one `fmuls` per sample" for Window, and `FIXED_MUL_Q15`'s cost row
+   says "x2 cycles (FMULS)" -- both assume a single `fmuls` computes a
+   full Q15 (16-bit) multiply. It can't: `fmuls Rd,Rr` takes two 8-bit
+   operands (`r16`-`r23`). Since `DT_COMPLEX_Q15` is 4 bytes/sample (this
+   spec's own figure), each component is a real 16-bit Q15 value, so
+   every Q15 multiply needs a real 16x16-bit signed routine.
+   **Decision (user-confirmed):** keep 16-bit Q15 (not drop to 8-bit
+   Q7) -- correct precision for the `numpy.fft` tolerance gate matters
+   more than matching the spec's original one-instruction assumption.
+   The routine: a standard multi-precision signed 16x16->32 multiply via
+   `mul`/`muls`/`mulsu` (the same decomposition `lower_requantize_element`
+   already uses for its 32x16 multiply, generalized to 16x16), then a
+   single `<<1` (not a 15-bit shift chain) to align the result, keeping
+   the top two bytes as the Q15 product. Measured via a hand-assembled
+   `.s` file through the real `avr-gcc` in `tools/`: **72 bytes, 24
+   instructions** per multiply (not 2 cycles / not a `FIXED_MUL_Q15`
+   category). `FIXED_MUL_Q15`/`COMPLEX_ADD` are retired from
+   `cost_table.toml` -- every instruction the routine emits
+   (`mul`/`muls`/`mulsu`/`add`/`adc`/`sub`/`sbc`/`lsl`/`rol`/`lds`/`sts`)
+   already has a `cost_category.c` mapping or gets one added (`rol`,
+   `sub`, `or` -- all 1-cycle, bucketed with `ADD`/`SUB` per this file's
+   existing "bucket choice within a cycle-count class is arbitrary"
+   precedent), so no new cost-table row is needed at all.
+2. **Flash budget: measured, not estimated.** Projected from the real
+   72-byte multiply figure: ~768 butterfly multiplies + 64 window
+   multiplies + 128 magnitude-squaring multiplies, plus combine/shift/
+   sqrt/peak-scan overhead, comes to roughly 90KB of the ATmega128's
+   128KB flash -- fits with real margin. This replaces the open risk
+   above (no longer open) and rules out needing to shrink
+   `DSP_FFT_SIZE`.
+3. **Overflow scaling, not a stated risk before now.** An unscaled
+   radix-2 FFT can grow sample magnitude by up to Nx over its stages
+   (64x here) -- enough to overflow Q15's `<1.0` range well before the
+   last butterfly stage. The implementation divides every butterfly
+   output by 2 (arithmetic shift) after combining, a standard, mandatory
+   part of any correct fixed-point FFT (not a judgment call the user
+   needs to weigh in on). Consequence: the final magnitude spectrum is
+   attenuated by 2^6=64x relative to an unscaled FFT -- the correctness
+   test against `numpy.fft` must divide the reference (or multiply the
+   AVR output) by 64 before comparing, or every peak will appear to fail
+   tolerance for a reason that has nothing to do with a bug.
+4. **`periodic.c` is not fully generic -- one function needs a real
+   change.** This spec's Architecture section said Phase B's wrapper
+   "requires no code changes." Not quite: `periodic_output_addr` (in
+   `codegen/periodic.c`) hardcodes `output_op->dtype != DT_INT8` and a
+   `PERIODIC_TERMINAL_OUTPUT_BYTES == 4` check, and its element-count
+   arithmetic silently assumes 1 byte/element (true for ML's `DT_INT8`,
+   false for DSP's 8 peaks x 2 bytes = 16 bytes). This function gets a
+   real, small extension to accept `DT_FIXED_Q15` output and compute
+   byte length via `sram_layout_elem_size` instead of assuming 1.
+   Also: `sram_layout_elem_size` currently returns 0 (unsupported) for
+   *both* `DT_FIXED_Q15` and `DT_COMPLEX_Q15` -- this spec's "alongside
+   the existing `DT_FIXED_Q15` handling" phrasing was wrong, there is no
+   existing handling; both are new.
+
+See the implementation plan
+(`docs/superpowers/plans/2026-08-03-milestone-6-dsp-path-implementation.md`)
+for the exact routines, generators, and task breakdown this amendment
+feeds into.
