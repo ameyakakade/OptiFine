@@ -227,15 +227,21 @@ changes what this spec's Architecture/Per-op sections said would happen.
    already uses for its 32x16 multiply, generalized to 16x16), then a
    single `<<1` (not a 15-bit shift chain) to align the result, keeping
    the top two bytes as the Q15 product. Measured via a hand-assembled
-   `.s` file through the real `avr-gcc` in `tools/`: **72 bytes, 24
+   `.s` file through the real `avr-gcc` in `tools/`: **72 bytes, 30
    instructions** per multiply (not 2 cycles / not a `FIXED_MUL_Q15`
    category). `FIXED_MUL_Q15`/`COMPLEX_ADD` are retired from
    `cost_table.toml` -- every instruction the routine emits
    (`mul`/`muls`/`mulsu`/`add`/`adc`/`sub`/`sbc`/`lsl`/`rol`/`lds`/`sts`)
-   already has a `cost_category.c` mapping or gets one added (`rol`,
-   `sub`, `or` -- all 1-cycle, bucketed with `ADD`/`SUB` per this file's
-   existing "bucket choice within a cycle-count class is arbitrary"
-   precedent), so no new cost-table row is needed at all.
+   already has a `cost_category.c` mapping (`sub` was already mapped to
+   `SUB`, just never exercised by `avr_interp.c`'s test-only opcode set
+   until now) except `rol`, which gets one added (1-cycle, bucketed with
+   `ADD` -- `rol Rd` assembles to `adc Rd,Rd`, same precedent as `lsl`
+   already being bucketed with `ADD` since it assembles to `add Rd,Rd`).
+   No new cost-table row is needed for the multiply routine at all.
+   Branch-free masked selects elsewhere in the DSP path (peak
+   extraction) use the arithmetic form `result = b + ((a-b) & mask)`
+   (`sub`+`and`+`add`, all already mapped) rather than an `or`-based
+   decomposition, so `or` is not needed either.
 2. **Flash budget: measured, not estimated.** Projected from the real
    72-byte multiply figure: ~768 butterfly multiplies + 64 window
    multiplies + 128 magnitude-squaring multiplies, plus combine/shift/
