@@ -20,19 +20,34 @@
  * upper bound of the valid address range). */
 #define SRAM_LAYOUT_LIMIT 0x1100
 
+/* Fixed-size scratch region the DSP path's lower.c helpers use for
+ * multiply/compare/select intermediates (see lower.c's DSP scratch cell
+ * table, offsets 0-179) -- 4 partial products + 1 unused 2-byte gap
+ * (a leftover offset boundary from an earlier draft, harmless) + 2
+ * complex-combine temporaries + 2 staged twiddle constants + 1
+ * always-zero cell + 8 integer-sqrt working cells + 2 equality-mask
+ * temporaries + 1 masked-select scratch + a 64-element magnitude
+ * working copy for PeakExtract + 5 peak-selection cells (best,
+ * best_idx, cand_idx, mask, select_tmp), all 2 bytes wide:
+ * (4+1+2+2+1+8+2+1+64+5)*2 = 180. */
+#define DSP_SCRATCH_BYTES 180
+
 typedef struct {
     uint16_t *op_addr; /* indexed by op id -> base SRAM address of that op's output tensor */
     size_t count;
     uint16_t bytes_used;
+    uint16_t dsp_scratch_addr; /* base of a reserved DSP_SCRATCH_BYTES region,
+                                 * computed unconditionally (harmless overhead
+                                 * for ML graphs, which never read it) */
 } SramLayout;
 
 /* Number of elements in `op`'s output tensor (product of output_shape, or 1
  * if output_shape_len == 0). */
 size_t sram_layout_num_elements(const IrOp *op);
 
-/* Bytes per element for `dtype`. Only DT_INT8 (1 byte) and DT_INT32
- * (4 bytes) are supported -- Phase A's naive codegen is ML-path only; the
- * DSP path's DT_FIXED_Q15/DT_COMPLEX_Q15 are out of scope here. */
+/* Bytes per element for `dtype`: 1 (DT_INT8), 4 (DT_INT32), 2
+ * (DT_FIXED_Q15, one Q15 fixed-point real), 4 (DT_COMPLEX_Q15, an
+ * interleaved real:imaginary Q15 pair). */
 size_t sram_layout_elem_size(DType dtype);
 
 /* Builds a one-pass address table over `graph->ops` in id order. Returns 0

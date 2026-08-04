@@ -20,8 +20,12 @@ size_t sram_layout_elem_size(DType dtype) {
             return 1;
         case DT_INT32:
             return 4;
+        case DT_FIXED_Q15:
+            return 2;
+        case DT_COMPLEX_Q15:
+            return 4;
         default:
-            return 0; /* unsupported on the ML path Phase A targets */
+            return 0;
     }
 }
 
@@ -52,6 +56,17 @@ int sram_layout_build(const IrGraph *graph, SramLayout *out) {
         out->op_addr[i] = (uint16_t)(SRAM_LAYOUT_BASE + offset);
         offset += (uint32_t)bytes;
     }
+    if ((uint32_t)SRAM_LAYOUT_BASE + offset + DSP_SCRATCH_BYTES > (uint32_t)SRAM_LAYOUT_LIMIT) {
+        fprintf(stderr,
+                "sram_layout_build: reserving the %d-byte DSP scratch region would push SRAM usage "
+                "past the %d-byte budget\n",
+                DSP_SCRATCH_BYTES, SRAM_LAYOUT_LIMIT - SRAM_LAYOUT_BASE);
+        free(out->op_addr);
+        out->op_addr = NULL;
+        return -1;
+    }
+    out->dsp_scratch_addr = (uint16_t)(SRAM_LAYOUT_BASE + offset);
+    offset += DSP_SCRATCH_BYTES;
     out->bytes_used = (uint16_t)offset;
     return 0;
 }
@@ -61,6 +76,7 @@ void sram_layout_free(SramLayout *out) {
     out->op_addr = NULL;
     out->count = 0;
     out->bytes_used = 0;
+    out->dsp_scratch_addr = 0;
 }
 
 uint16_t sram_layout_addr(const SramLayout *layout, const IrGraph *graph,

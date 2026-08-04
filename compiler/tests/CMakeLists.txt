@@ -79,6 +79,17 @@ add_test(NAME test_lower COMMAND test_lower
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_input.txt
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_output.txt)
 
+add_executable(test_sram_layout_dsp test_sram_layout_dsp.c
+    ${CMAKE_SOURCE_DIR}/src/ir.c
+    ${CMAKE_SOURCE_DIR}/src/dsp_build.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
+)
+target_include_directories(test_sram_layout_dsp PRIVATE ${CMAKE_SOURCE_DIR}/include)
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_sram_layout_dsp PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+add_test(NAME test_sram_layout_dsp COMMAND test_sram_layout_dsp)
+
 add_executable(test_periodic test_periodic.c
     ${CMAKE_SOURCE_DIR}/src/codegen/periodic.c
 )
