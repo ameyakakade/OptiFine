@@ -33,6 +33,7 @@ int sram_layout_build(const IrGraph *graph, SramLayout *out) {
     out->op_addr = calloc(graph->count, sizeof(uint16_t));
     out->count = graph->count;
     out->bytes_used = 0;
+    out->dsp_scratch_addr = 0;
 
     uint32_t offset = 0; /* wider than uint16_t so the overflow check below is exact */
     for (size_t i = 0; i < graph->count; i++) {
