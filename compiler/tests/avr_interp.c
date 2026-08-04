@@ -110,6 +110,21 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         interp->carry = new_carry;
         return 0;
     }
+    if (strcmp(m, "sub") == 0) {
+        int rd = reg_of(instr->operands[0]);
+        int result = (int)r[rd] - (int)r[reg_of(instr->operands[1])];
+        interp->carry = (result < 0) ? 1 : 0;
+        r[rd] = (uint8_t)(result & 0xFF);
+        return 0;
+    }
+    if (strcmp(m, "rol") == 0) { /* the assembler alias for `adc Rd,Rd` */
+        int rd = reg_of(instr->operands[0]);
+        uint8_t v = r[rd];
+        uint8_t new_carry = (v & 0x80) ? 1 : 0;
+        r[rd] = (uint8_t)((v << 1) | (interp->carry ? 1 : 0));
+        interp->carry = new_carry;
+        return 0;
+    }
     if (strcmp(m, "mul") == 0) { /* unsigned x unsigned -> r1:r0 */
         uint16_t product = (uint16_t)(r[reg_of(instr->operands[0])] * r[reg_of(instr->operands[1])]);
         r[0] = (uint8_t)(product & 0xFF);

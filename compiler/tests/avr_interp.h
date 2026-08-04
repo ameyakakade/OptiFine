@@ -1,6 +1,6 @@
 /* A small test-only AVR interpreter covering exactly the opcode subset
  * compiler/src/codegen/lower.c emits (ldi, sts, lds, mov, clr, add, adc,
- * sbc, lsl, com, and, asr, ror, mul, muls, mulsu -- 16 opcodes total).
+ * sub, sbc, lsl, rol, com, and, asr, ror, mul, muls, mulsu -- 18 opcodes total).
  * This is NOT a general AVR simulator: it exists only to execute this
  * project's own generated code for golden-value correctness testing, and
  * must never be used as a substitute for Avrora's real energy numbers or

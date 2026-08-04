@@ -18,6 +18,16 @@ if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
 endif()
 add_test(NAME test_dsp_build COMMAND test_dsp_build)
 
+add_executable(test_avr_interp_opcodes test_avr_interp_opcodes.c
+    avr_interp.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+)
+target_include_directories(test_avr_interp_opcodes PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_avr_interp_opcodes PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+add_test(NAME test_avr_interp_opcodes COMMAND test_avr_interp_opcodes)
+
 add_executable(test_pb_reader test_pb_reader.c
     ${CMAKE_SOURCE_DIR}/src/pb_reader.c
 )

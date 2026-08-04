@@ -26,6 +26,7 @@ static const CategoryEntry kCategories[] = {
     {"adc", "ADD"},     /* add with carry, same cycle count as ADD */
     {"sbc", "SUB"},     /* subtract with carry, same cycle count as SUB */
     {"lsl", "ADD"},     /* assembler alias for `add Rd,Rd` -- literally the same opcode */
+    {"rol", "ADD"},     /* assembler alias for `adc Rd,Rd`, same precedent as lsl->ADD */
     {"clr", "MOV"},     /* register-init family */
     {"com", "SUB"},     /* 1-cycle bucket, arbitrary within-bucket choice */
     {"and", "ADD"},     /* 1-cycle bucket, arbitrary within-bucket choice */
