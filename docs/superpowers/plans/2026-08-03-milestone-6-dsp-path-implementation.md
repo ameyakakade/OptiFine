@@ -374,12 +374,15 @@ Add near `SRAM_LAYOUT_LIMIT`:
 ```c
 /* Fixed-size scratch region the DSP path's lower.c helpers use for
  * multiply/compare/select intermediates (see lower.c's DSP scratch cell
- * table) -- 4 partial products + 2 complex-combine temporaries + 2
- * staged twiddle constants + 1 masked-select scratch + 1 always-zero
- * cell + 8 integer-sqrt working cells + a 64-element magnitude working
- * copy for PeakExtract + 4 peak-selection cells + 2 equality-mask
- * temporaries, all 2 bytes wide: (4+2+2+1+1+8+64+4+2)*2 = 176. */
-#define DSP_SCRATCH_BYTES 176
+ * table, offsets 0-179) -- 4 partial products + 1 unused 2-byte gap
+ * (a leftover offset boundary from an earlier draft, harmless) + 2
+ * complex-combine temporaries + 2 staged twiddle constants + 1
+ * always-zero cell + 8 integer-sqrt working cells + 2 equality-mask
+ * temporaries + 1 masked-select scratch + a 64-element magnitude
+ * working copy for PeakExtract + 5 peak-selection cells (best,
+ * best_idx, cand_idx, mask, select_tmp), all 2 bytes wide:
+ * (4+1+2+2+1+8+2+1+64+5)*2 = 180. */
+#define DSP_SCRATCH_BYTES 180
 ```
 
 Add the field to `SramLayout`:
@@ -1570,7 +1573,8 @@ GIT_AUTHOR_DATE="2026-08-08T14:00:00+05:30" GIT_COMMITTER_DATE="2026-08-08T14:00
   lower_eq_mask16(...)`, `static void lower_masked_select16(...)`,
   `static void lower_isqrt16(...)`; `lower_op` gains `case
   OP_MAGNITUDE:`. Continues the scratch-cell numbering from Task 7
-  (offsets 16 through 47 within `layout->dsp_scratch_addr`).
+  (offsets 18 through 41 within `layout->dsp_scratch_addr`; 16-17 is an
+  unused 2-byte gap, harmless).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1629,8 +1633,6 @@ In `lower.c`, after the `OP_FFT_BUTTERFLY` block:
 
 ```c
 /* ---- Branch-free compare/select, reused by isqrt and PeakExtract ---- */
-
-#define DSP_SCRATCH_TMP_DIFF ((uint16_t)(layout_scratch + 16))
 
 /* Sets mask (2 bytes, both 0xFF or both 0x00) to "a >= b" via a
  * subtract-for-borrow-only trick: sub/sbc computes a-b purely to capture
@@ -1755,12 +1757,19 @@ static void lower_isqrt16(InstrBuf *buf, uint16_t layout_scratch, uint16_t in_ad
     lower_copy16(buf, DSP_SCRATCH_ISQRT_RES, out_addr);
 }
 
+/* lower_isqrt16 reads DSP_SCRATCH_ZERO16 but does not write it --
+ * lower_magnitude writes it once before its loop and relies on that for
+ * every lower_isqrt16 call inside the loop. This hook calls
+ * lower_isqrt16 directly, without going through lower_magnitude, so it
+ * writes DSP_SCRATCH_ZERO16 itself first, matching what lower_magnitude
+ * guarantees at its own real call sites. */
 int lower_isqrt16_test_hook(uint16_t in_addr, uint16_t out_addr,
                              const CostModel *cost_model, Candidate *out) {
     InstrBuf buf;
     instrbuf_init(&buf);
-    lower_const16(&buf, 0, DSP_SCRATCH_ZERO16 - 0); /* placeholder addr fixed below */
-    lower_isqrt16(&buf, 0x1080, in_addr, out_addr);
+    uint16_t scratch = 0x1080;
+    lower_const16(&buf, 0, (uint16_t)(scratch + 18)); /* DSP_SCRATCH_ZERO16 */
+    lower_isqrt16(&buf, scratch, in_addr, out_addr);
     return instrbuf_price(&buf, cost_model, out);
 }
 
@@ -1784,44 +1793,14 @@ static void lower_magnitude(InstrBuf *buf, const IrGraph *graph, const SramLayou
 }
 ```
 
-**A note on the awkward `lower_isqrt16_test_hook` line above:** the
-`DSP_SCRATCH_ZERO16` macro depends on a `layout_scratch` parameter name
-that doesn't exist in the hook's own scope. Fix it by writing the hook
-without the macros, passing the real scratch base directly, and by
-making `lower_isqrt16` take `layout_scratch` as a plain `uint16_t`
-parameter (already shown above) rather than relying on the `#define`s,
-which only work inside functions that literally have a variable named
-`layout_scratch` or `layout` in scope. Rewrite `lower_isqrt16_test_hook`
-as:
-
-```c
-int lower_isqrt16_test_hook(uint16_t in_addr, uint16_t out_addr,
-                             const CostModel *cost_model, Candidate *out) {
-    InstrBuf buf;
-    instrbuf_init(&buf);
-    lower_isqrt16(&buf, 0x1080, in_addr, out_addr);
-    return instrbuf_price(&buf, cost_model, out);
-}
-```
-
-(`lower_isqrt16` already writes `DSP_SCRATCH_ZERO16` -- wait, it doesn't;
-`lower_magnitude` does, once, before calling `lower_isqrt16` in a loop.
-Since the hook calls `lower_isqrt16` directly without going through
-`lower_magnitude`, add one `lower_const16(&buf, 0, 0x1080 + 18);` line
-before the `lower_isqrt16` call in the hook so `DSP_SCRATCH_ZERO16` is
-populated before use, matching what `lower_magnitude` guarantees for its
-real call sites.)
-
-Also fix the `DSP_SCRATCH_TMP_DIFF`/`DSP_SCRATCH_*` macros defined with
-an implicit `layout_scratch` above `lower_ge_mask16`/`lower_eq_mask16`/
-`lower_masked_select16`: those three functions take explicit `_addr`
-parameters for every scratch cell they touch (no reliance on the
-`layout_scratch`-implicit macros), so only `lower_isqrt16` and
-`lower_magnitude` need the macro or the plain-parameter form -- keep
-`lower_isqrt16` as a plain-parameter function (shown above,
-`layout_scratch` is a real parameter name there) and delete the
-`#define DSP_SCRATCH_TMP_DIFF ...` line entirely (unused after this
-rewrite; `lower_masked_select16`'s `tmp_addr` parameter replaces it).
+Note the two different scratch-addressing styles above are both
+deliberate, not inconsistent: `lower_ge_mask16`/`lower_eq_mask16`/
+`lower_masked_select16` take explicit `_addr` parameters for every cell
+they touch (no dependency on any particular variable name in the
+caller), while `lower_isqrt16`'s `DSP_SCRATCH_*` macros expand against
+its own `layout_scratch` parameter -- valid only inside a function that
+actually has a parameter or local variable of that exact name in scope,
+which `lower_isqrt16` and `lower_magnitude` (below) both do.
 
 In `lower_op`'s switch:
 
@@ -1866,7 +1845,7 @@ double-removing tied values).
 
 **Interfaces:**
 - Produces: `static void lower_peak_extract(...)`; `lower_op` gains
-  `case OP_PEAK_EXTRACT:`. Uses scratch offsets 42 through 175 (a
+  `case OP_PEAK_EXTRACT:`. Uses scratch offsets 42 through 179 (a
   64-element, 2-byte-wide working copy of the magnitude array plus a
   handful of selection cells -- the bulk of `DSP_SCRATCH_BYTES`).
 
