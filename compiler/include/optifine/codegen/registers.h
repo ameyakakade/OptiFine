@@ -44,4 +44,19 @@
 #define MATMUL_CACHE_POOL_SIZE 21
 extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
 
+/* DSP path (compiler/src/codegen/lower.c's lower_fixed_mul_q15 and
+ * friends) -- never live concurrently with the ML-path registers above,
+ * since a --dsp build never lowers an ML op and vice versa (see main.c).
+ * A0/A1/B0/B1 sit in r16-r23 because muls/mulsu require both operands
+ * there; the accumulator/scratch registers don't share that constraint
+ * but are kept in the same window for a compact, documented footprint. */
+#define REG_DSP_OP_A_LO 16
+#define REG_DSP_OP_A_HI 17
+#define REG_DSP_OP_B_LO 18
+#define REG_DSP_OP_B_HI 19
+#define REG_DSP_ACC_P1  20  /* 3-byte product accumulator, p1(low):p2:p3(high) */
+#define REG_DSP_ACC_P2  21
+#define REG_DSP_ACC_P3  22
+#define REG_DSP_SIGNEXT 23  /* sign-extension scratch, reused across partial products */
+
 #endif /* OPTIFINE_CODEGEN_REGISTERS_H */
