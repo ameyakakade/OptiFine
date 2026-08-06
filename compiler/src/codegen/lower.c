@@ -404,13 +404,27 @@ static void lower_const16(InstrBuf *buf, int16_t value, uint16_t addr) {
  * bits kept); the two cross partials (XH*YL, YH*XL, both signed x
  * unsigned via mulsu) are sign-extended and accumulated; the top partial
  * (XH*YH, signed x signed via muls) lands directly in the top two bytes.
+ * Each cross term's sign byte (mov/lsl/sbc) is computed BEFORE its
+ * add/adc pair, not after -- the add/adc chain must run uninterrupted
+ * from p1 through p3 so the real carry out of `adc p2,r1` threads into
+ * `adc p3,sign`. Computing the sign byte in between clobbers that carry
+ * with the unrelated one lsl/sbc produce internally, silently dropping
+ * the cross term's overflow into p3 (found during Task 4 implementation,
+ * re-derived correctly, and cross-checked against this file's own working
+ * precedent -- lower_matmul's sign-before-add ordering for the same class
+ * of widen-and-accumulate -- plus a from-scratch AVR carry-flag simulation
+ * over the known test vectors and 5000 random Q15 pairs; corrected here
+ * before Task 4 was re-dispatched. See the 2026-08-03 spec amendment for
+ * where this routine's existence and byte/instruction budget originate).
  * A single <<1 across the 3-byte accumulator then aligns the result --
  * NOT a 15-bit shift chain -- and the top two bytes are the Q15 product.
  * Truncates rather than rounds (no rounding-bias correction before the
  * shift); test_dsp_lower.c's tolerance check confirms this stays well
  * within the numpy.fft comparison tolerance used later in this plan.
  * Measured through the real avr-gcc while writing the Milestone 6 spec's
- * 2026-08-03 amendment: 72 bytes, 30 instructions. */
+ * 2026-08-03 amendment: 72 bytes, 30 instructions (this instruction count
+ * is unaffected by the sign-byte reordering -- same 7 instructions per
+ * cross term, just reordered). */
 static void lower_fixed_mul_q15(InstrBuf *buf, uint16_t a_addr, uint16_t b_addr, uint16_t out_addr) {
     char xl[AVR_OPERAND_LEN], xh[AVR_OPERAND_LEN], yl[AVR_OPERAND_LEN], yh[AVR_OPERAND_LEN];
     char p1[AVR_OPERAND_LEN], p2[AVR_OPERAND_LEN], p3[AVR_OPERAND_LEN], sign[AVR_OPERAND_LEN];
