@@ -79,6 +79,28 @@ add_test(NAME test_lower COMMAND test_lower
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_input.txt
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_output.txt)
 
+add_executable(test_dsp_lower test_dsp_lower.c
+    avr_interp.c
+    ${CMAKE_SOURCE_DIR}/src/ir.c
+    ${CMAKE_SOURCE_DIR}/src/dsp_build.c
+    ${CMAKE_SOURCE_DIR}/src/cost_model.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
+)
+target_include_directories(test_dsp_lower PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_dsp_lower PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    target_link_libraries(test_dsp_lower PRIVATE m)
+endif()
+add_test(NAME test_dsp_lower COMMAND test_dsp_lower
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)
+
 add_executable(test_sram_layout_dsp test_sram_layout_dsp.c
     ${CMAKE_SOURCE_DIR}/src/ir.c
     ${CMAKE_SOURCE_DIR}/src/dsp_build.c

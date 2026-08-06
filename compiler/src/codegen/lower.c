@@ -9,6 +9,7 @@
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/registers.h"
+#include "optifine/dsp_build.h"
 
 /* ---------------------------------------------------------------------- */
 
@@ -306,6 +307,181 @@ static int lower_requantize(InstrBuf *buf, const IrGraph *graph, const SramLayou
     return 0;
 }
 
+/* ---- DSP path: Q15 arithmetic primitives shared by Window, FftButterfly,
+ * Magnitude, and PeakExtract ---- */
+
+/* out = a - b, 16-bit signed (sub for the low byte, sbc for the high --
+ * same multi-byte-with-borrow convention lower_add32_element already
+ * uses for addition). */
+static void lower_sub16(InstrBuf *buf, uint16_t a_addr, uint16_t b_addr, uint16_t out_addr) {
+    char ra[AVR_OPERAND_LEN], rb[AVR_OPERAND_LEN];
+    fmt_reg(ra, REG_SCRATCH0);
+    fmt_reg(rb, REG_SCRATCH1);
+    for (int i = 0; i < 2; i++) {
+        char aa[AVR_OPERAND_LEN], ab[AVR_OPERAND_LEN], ao[AVR_OPERAND_LEN];
+        fmt_addr(aa, (uint16_t)(a_addr + i));
+        fmt_addr(ab, (uint16_t)(b_addr + i));
+        fmt_addr(ao, (uint16_t)(out_addr + i));
+        ins2(buf, "lds", ra, aa);
+        ins2(buf, "lds", rb, ab);
+        ins2(buf, i == 0 ? "sub" : "sbc", ra, rb);
+        ins2(buf, "sts", ao, ra);
+    }
+}
+
+/* out = a + b, 16-bit signed. */
+static void lower_add16(InstrBuf *buf, uint16_t a_addr, uint16_t b_addr, uint16_t out_addr) {
+    char ra[AVR_OPERAND_LEN], rb[AVR_OPERAND_LEN];
+    fmt_reg(ra, REG_SCRATCH0);
+    fmt_reg(rb, REG_SCRATCH1);
+    for (int i = 0; i < 2; i++) {
+        char aa[AVR_OPERAND_LEN], ab[AVR_OPERAND_LEN], ao[AVR_OPERAND_LEN];
+        fmt_addr(aa, (uint16_t)(a_addr + i));
+        fmt_addr(ab, (uint16_t)(b_addr + i));
+        fmt_addr(ao, (uint16_t)(out_addr + i));
+        ins2(buf, "lds", ra, aa);
+        ins2(buf, "lds", rb, ab);
+        ins2(buf, i == 0 ? "add" : "adc", ra, rb);
+        ins2(buf, "sts", ao, ra);
+    }
+}
+
+/* out = a / 2, arithmetic shift right by 1 (may alias a_addr == out_addr). */
+static void lower_asr16(InstrBuf *buf, uint16_t a_addr, uint16_t out_addr) {
+    char rhi[AVR_OPERAND_LEN], rlo[AVR_OPERAND_LEN];
+    fmt_reg(rhi, REG_SCRATCH0);
+    fmt_reg(rlo, REG_SCRATCH1);
+    char ahi[AVR_OPERAND_LEN], alo[AVR_OPERAND_LEN];
+    fmt_addr(ahi, (uint16_t)(a_addr + 1));
+    fmt_addr(alo, a_addr);
+    ins2(buf, "lds", rhi, ahi);
+    ins2(buf, "lds", rlo, alo);
+    ins1(buf, "asr", rhi);
+    ins1(buf, "ror", rlo);
+    char ohi[AVR_OPERAND_LEN], olo[AVR_OPERAND_LEN];
+    fmt_addr(ohi, (uint16_t)(out_addr + 1));
+    fmt_addr(olo, out_addr);
+    ins2(buf, "sts", ohi, rhi);
+    ins2(buf, "sts", olo, rlo);
+}
+
+/* out = a, byte-for-byte 16-bit copy through SRAM. */
+static void lower_copy16(InstrBuf *buf, uint16_t a_addr, uint16_t out_addr) {
+    char r[AVR_OPERAND_LEN];
+    fmt_reg(r, REG_SCRATCH0);
+    for (int i = 0; i < 2; i++) {
+        char ai[AVR_OPERAND_LEN], ao[AVR_OPERAND_LEN];
+        fmt_addr(ai, (uint16_t)(a_addr + i));
+        fmt_addr(ao, (uint16_t)(out_addr + i));
+        ins2(buf, "lds", r, ai);
+        ins2(buf, "sts", ao, r);
+    }
+}
+
+/* Writes a compile-time-constant 16-bit value to SRAM (ldi+sts x2). Used
+ * to stage host-computed constants (twiddle factors, the always-zero
+ * cell, loop-index literals) as ordinary SRAM operands the other
+ * primitives here can read. */
+static void lower_const16(InstrBuf *buf, int16_t value, uint16_t addr) {
+    char r[AVR_OPERAND_LEN], imm[AVR_OPERAND_LEN], a[AVR_OPERAND_LEN];
+    fmt_reg(r, REG_SCRATCH0);
+    fmt_imm(imm, (uint8_t)(value & 0xFF));
+    fmt_addr(a, addr);
+    ins2(buf, "ldi", r, imm);
+    ins2(buf, "sts", a, r);
+    fmt_imm(imm, (uint8_t)(((uint16_t)value >> 8) & 0xFF));
+    fmt_addr(a, (uint16_t)(addr + 1));
+    ins2(buf, "ldi", r, imm);
+    ins2(buf, "sts", a, r);
+}
+
+/* Q15 x Q15 -> Q15 signed fractional multiply. Standard multi-precision
+ * signed 16x16 multiply (same mul/muls/mulsu decomposition
+ * lower_requantize_element already uses for its 32x16 multiply,
+ * generalized to 16x16): the low partial (XL*YL, unsigned x unsigned)
+ * contributes only its own high byte (its low byte is entirely below the
+ * final <<1 correction and is dropped, with zero precision loss for the
+ * bits kept); the two cross partials (XH*YL, YH*XL, both signed x
+ * unsigned via mulsu) are sign-extended and accumulated; the top partial
+ * (XH*YH, signed x signed via muls) lands directly in the top two bytes.
+ * A single <<1 across the 3-byte accumulator then aligns the result --
+ * NOT a 15-bit shift chain -- and the top two bytes are the Q15 product.
+ * Truncates rather than rounds (no rounding-bias correction before the
+ * shift); test_dsp_lower.c's tolerance check confirms this stays well
+ * within the numpy.fft comparison tolerance used later in this plan.
+ * Measured through the real avr-gcc while writing the Milestone 6 spec's
+ * 2026-08-03 amendment: 72 bytes, 30 instructions. */
+static void lower_fixed_mul_q15(InstrBuf *buf, uint16_t a_addr, uint16_t b_addr, uint16_t out_addr) {
+    char xl[AVR_OPERAND_LEN], xh[AVR_OPERAND_LEN], yl[AVR_OPERAND_LEN], yh[AVR_OPERAND_LEN];
+    char p1[AVR_OPERAND_LEN], p2[AVR_OPERAND_LEN], p3[AVR_OPERAND_LEN], sign[AVR_OPERAND_LEN];
+    char r0[AVR_OPERAND_LEN], r1[AVR_OPERAND_LEN];
+    fmt_reg(xl, REG_DSP_OP_A_LO);
+    fmt_reg(xh, REG_DSP_OP_A_HI);
+    fmt_reg(yl, REG_DSP_OP_B_LO);
+    fmt_reg(yh, REG_DSP_OP_B_HI);
+    fmt_reg(p1, REG_DSP_ACC_P1);
+    fmt_reg(p2, REG_DSP_ACC_P2);
+    fmt_reg(p3, REG_DSP_ACC_P3);
+    fmt_reg(sign, REG_DSP_SIGNEXT);
+    fmt_reg(r0, 0);
+    fmt_reg(r1, 1);
+
+    char addr[AVR_OPERAND_LEN];
+    fmt_addr(addr, a_addr);
+    ins2(buf, "lds", xl, addr);
+    fmt_addr(addr, (uint16_t)(a_addr + 1));
+    ins2(buf, "lds", xh, addr);
+    fmt_addr(addr, b_addr);
+    ins2(buf, "lds", yl, addr);
+    fmt_addr(addr, (uint16_t)(b_addr + 1));
+    ins2(buf, "lds", yh, addr);
+
+    ins2(buf, "mul", xl, yl);
+    ins2(buf, "mov", p1, r1);
+    ins1(buf, "clr", p2);
+    ins1(buf, "clr", p3);
+
+    ins2(buf, "mulsu", xh, yl);
+    ins2(buf, "mov", sign, r1);
+    ins1(buf, "lsl", sign);
+    ins2(buf, "sbc", sign, sign);
+    ins2(buf, "add", p1, r0);
+    ins2(buf, "adc", p2, r1);
+    ins2(buf, "adc", p3, sign);
+
+    ins2(buf, "mulsu", yh, xl);
+    ins2(buf, "mov", sign, r1);
+    ins1(buf, "lsl", sign);
+    ins2(buf, "sbc", sign, sign);
+    ins2(buf, "add", p1, r0);
+    ins2(buf, "adc", p2, r1);
+    ins2(buf, "adc", p3, sign);
+
+    ins2(buf, "muls", xh, yh);
+    ins2(buf, "add", p2, r0);
+    ins2(buf, "adc", p3, r1);
+
+    ins1(buf, "lsl", p1);
+    ins1(buf, "rol", p2);
+    ins1(buf, "rol", p3);
+
+    fmt_addr(addr, out_addr);
+    ins2(buf, "sts", addr, p2);
+    fmt_addr(addr, (uint16_t)(out_addr + 1));
+    ins2(buf, "sts", addr, p3);
+}
+
+/* Test-only seam: lower_fixed_mul_q15 itself stays static (matches every
+ * other per-op helper in this file), but the correctness test in
+ * test_dsp_lower.c needs to price and run one multiply in isolation. */
+int lower_fixed_mul_q15_test_hook(uint16_t a_addr, uint16_t b_addr, uint16_t out_addr,
+                                   const CostModel *cost_model, Candidate *out) {
+    InstrBuf buf;
+    instrbuf_init(&buf);
+    lower_fixed_mul_q15(&buf, a_addr, b_addr, out_addr);
+    return instrbuf_price(&buf, cost_model, out);
+}
+
 /* ---- OP_OUTPUT: copy to a fixed, dedicated address ---- */
 
 static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *layout, size_t op_id) {
@@ -354,14 +530,17 @@ int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_inpu
         vals[i] = calloc(n, sizeof(int64_t));
 
         switch (op->kind) {
-            case OP_INPUT:
-                if (demo_input_len != n) {
-                    fprintf(stderr, "lower: demo input has %zu bytes, graph expects %zu\n", demo_input_len, n);
+            case OP_INPUT: {
+                size_t expected_bytes = n * sram_layout_elem_size(op->dtype);
+                if (demo_input_len != expected_bytes) {
+                    fprintf(stderr, "lower: demo input has %zu bytes, graph expects %zu\n", demo_input_len,
+                            expected_bytes);
                     rc = -1;
                     break;
                 }
                 for (size_t k = 0; k < n; k++) vals[i][k] = demo_input[k];
                 break;
+            }
             case OP_CONST:
                 if (op->dtype == DT_INT8) {
                     const int8_t *bytes = (const int8_t *)op->data;
@@ -457,9 +636,10 @@ int lower_op(const IrGraph *graph, size_t op_id,
 
     switch (op->kind) {
         case OP_INPUT: {
-            if (demo_input_len != (size_t)sram_layout_num_elements(op)) {
+            size_t expected_bytes = sram_layout_num_elements(op) * sram_layout_elem_size(op->dtype);
+            if (demo_input_len != expected_bytes) {
                 fprintf(stderr, "lower: demo input has %zu bytes, graph expects %zu\n",
-                        demo_input_len, sram_layout_num_elements(op));
+                        demo_input_len, expected_bytes);
                 return -1;
             }
             uint16_t addr = sram_layout_addr(layout, graph, op_id, 0);

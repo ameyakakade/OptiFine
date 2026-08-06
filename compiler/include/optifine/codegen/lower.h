@@ -54,4 +54,9 @@ int lower_op(const IrGraph *graph, size_t op_id,
              const int8_t *demo_input, size_t demo_input_len,
              Candidate *out);
 
+/* Test-only seam for test_dsp_lower.c -- see lower.c's lower_fixed_mul_q15
+ * comment. Not part of the codegen pipeline's real call path. */
+int lower_fixed_mul_q15_test_hook(uint16_t a_addr, uint16_t b_addr, uint16_t out_addr,
+                                   const CostModel *cost_model, Candidate *out);
+
 #endif /* OPTIFINE_CODEGEN_LOWER_H */
