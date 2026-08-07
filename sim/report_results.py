@@ -41,6 +41,22 @@ ACCEPTED_PRESCALERS = (32, 128, 1024)
 PRESCALER_PERIOD = {8: 2048, 32: 8192, 128: 32768, 1024: 262144}
 
 
+#: Residues below this are floating-point noise, not energy.
+#:
+#: The busy-wait naive/optimized difference is genuinely zero -- both variants
+#: burn the full wake period in Active mode -- but the two Avrora reports print
+#: that identical energy as slightly different decimal strings, so parsing them
+#: as doubles leaves a residue around 1e-11 nJ. Rendering that as "-0.0000"
+#: would invite a second look at a number that is exactly what it should be.
+#: One femto-nJ is some twelve orders of magnitude below a single Active cycle
+#: (2.8375 nJ), so nothing physical can hide beneath this threshold.
+FLOAT_NOISE_NJ = 1e-9
+
+
+def _snap(value: float) -> float:
+    return 0.0 if abs(value) < FLOAT_NOISE_NJ else value
+
+
 class MissingArtifact(RuntimeError):
     pass
 
@@ -117,10 +133,7 @@ def phase_b() -> list[dict[str, object]]:
             "compiler_delta_nj": cell["powersave"]["naive"]["nj"] - ps,
             # Under busy-wait the same two variants cost the same, because the
             # period alone determines the energy.
-            # ``+ 0.0`` normalises IEEE negative zero: this difference is
-            # exactly zero, and "-0.0000" in a results table invites a
-            # second look at a number that has nothing wrong with it.
-            "compiler_delta_active_nj": (cell["active"]["naive"]["nj"] - act) + 0.0,
+            "compiler_delta_active_nj": _snap(cell["active"]["naive"]["nj"] - act),
             "active_cycles_naive": cell["powersave"]["naive"]["active_cycles"],
             "active_cycles_optimized": cell["powersave"]["optimized"]["active_cycles"],
         })
