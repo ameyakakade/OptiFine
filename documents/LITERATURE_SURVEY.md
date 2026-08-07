@@ -124,7 +124,7 @@ allowed to leave Active mode.
   numbers do not (board quiescent current, regulator, leakage).
 - The ~61x ratio and the ~0.984 slope are derived from Avrora's ATmega128
   power model, not from a datasheet or a measurement. They are internally
-  consistent with Avrora (the project's ground-truth benchmark) but are a
+  consistent with Avrora (the project's simulation reference) but are a
   structural argument against the *generality* of Heim et al.'s claim, not a
   measurement that beats their measured energy numbers on Cortex-M.
 
@@ -134,7 +134,7 @@ allowed to leave Active mode.
 
 | Ref. | Contribution | Layer | Target | Guarantee | Validation | What to compare (axis) |
 |---|---|---|---|---|---|---|
-| **Huang & Ghiasi**, ACM TODAES 12(3), 2007 (doi:10.1145/1255456.1255464) | Compiler-inserted power-mode switches with **deadline guarantees** via static analysis | compiler | ARM (65 nm), DVS+ABB | deadline | analytic + sim | Mechanism identity (statically guaranteed mode switch minimizing energy); % saving (~33%) vs. OptiFine's duty-cycle saving |
+| **Huang & Ghiasi**, ACM TODAES 12(3) Art. 27, 2007 (doi:10.1145/1255456.1255464) | Compiler-inserted power-mode switches with **deadline guarantees** via static analysis | compiler | ARM (65 nm), DVS+ABB | deadline | analytic + sim | Mechanism identity (statically guaranteed mode switch minimizing energy); % saving (~33%) vs. OptiFine's duty-cycle saving |
 | **Hsu & Kremer**, PLDI 2003 | Compiler DVS where slack exists | compiler | VLIW/RISC | — | analytic | "saving scales with slack/idle" — the analytic ancestor of `saving ~= idle_fraction` |
 | **Wanner et al.**, DATE 2011 (doi:10.1109/DATE.2011.5763133) | Duty-cycling scheduling to save energy | **OS/RTOS** (TinyOS/FreeRTOS, real boards) | MSP430-class | — | hardware | Layer (OS vs. OptiFine's compiler); adaptive vs. OptiFine's static compile-time; 3–22x active-time reduction vs. OptiFine's % idle-fraction saving; sleep-cost-ratio insight |
 | **Maeng & Lucia** (CatNap), PLDI 2020 | Feasibility/schedule validation for intermittent energy | scheduling | ARM/FRAM | feasibility test | hardware | Scheduling philosophy (feasibility check before run) vs. OptiFine's static deadline rejection |
@@ -148,10 +148,25 @@ prior result's *analytic bound* (e.g. Hsu & Kremer's slack argument; Huang &
 Ghiasi's mode-switch guarantee) in OptiFine's terms (the
 `saving ~= 0.984 x idle_fraction` identity). Claim **mechanism/regime
 novelty**, never "we beat X%" across a different ISA and a sim/hardware gap.
-OptiFine's defensible novelty claim: the largest savings claimed for
-*compiler-directed* sleep scheduling on an 8-bit AVR, validated in a
-cycle-accurate simulator, with the crossover derived from a measured
-per-cycle cost ratio rather than assumed.
+
+OptiFine's defensible position, stated without a superlative: it combines
+and contrasts **two energy-aware compiler layers on one AVR backend** --
+Active-mode machine-code optimisation (Phase A) and compiler-directed
+low-power-state scheduling (Phase B) -- and reports the experimental
+contrast between the two regimes. The contribution is that contrast and
+the engineering integration, not the invention of energy-aware
+compilation (Tiwari et al. 1994 onward) nor of sleep scheduling (Hsu &
+Kremer 2003, Huang & Ghiasi 2007, Wanner et al. 2011), both of which
+long predate this project.
+
+Two claims this project must **not** make. First, that its saving is "the
+largest" for compiler-directed sleep scheduling on AVR: the Phase B
+percentage is duty-cycle-parameterized and approaches 100% as the wake
+period grows, so a larger number is always purchasable by sleeping longer
+and means nothing on its own. Second, that the ~61x per-cycle ratio is
+*measured*: it is derived from Avrora's own ATmega128 power model (see
+section 1.5), and no physical measurement exists anywhere in this
+project.
 
 ---
 
@@ -159,7 +174,7 @@ per-cycle cost ratio rather than assumed.
 
 | Ref. | Contribution | Target | Reported result | Why it matters / what to compare |
 |---|---|---|---|---|
-| **Surakka et al.**, Estonian J. Eng. 11(4), 2005 (doi:10.3176/eng.2005.4.07) | Instruction/register-order selection for energy | **8-bit AVR (AT90S8515)** | ~0.5% savings | The only prior instruction-level-energy work on an AVR; closest head-to-head for Phase A. Reproduce their register-order experiment on ATmega128 and compare vs. OptiFine's ~1.83% on the same ISA family. |
+| **Surakka et al.**, Proc. Estonian Acad. Sci. Eng. 11(4):347-357, 2005 (doi:10.3176/eng.2005.4.07) | Instruction/register-order selection for energy | **8-bit AVR (AT90S8515)** | ~0.5% savings | The only prior instruction-level-energy work on an AVR; closest head-to-head for Phase A. Reproduce their register-order experiment on ATmega128 and compare vs. OptiFine's ~1.83% on the same ISA family. |
 | **Lee, Tiwari, Malik, Fujita**, IEEE TVLSI 5(3), 1997 (doi:10.1109/92.555992) | Instruction-selection-by-energy scheduling | DSP | 26–73% (scheduling) | The canonical "select instructions by energy" paper. Mechanism ancestor of Phase A, though on a DSP with more scheduling freedom. Corollary: per-ISA savings are not portable. |
 | **Tiwari, Malik, Wolfe**, IEEE TVLSI 2(4), 1994 (doi:10.1109/92.335012) | Instruction-level power model | embedded RISC/CISC | — | **Proving-correct**: `cost_table.toml` and the whole methodology descend from this. OptiFine confirms (on AVR) that instruction *cycle count* dominates energy when no per-opcode current variation is available to cited sources. |
 | **Pallister et al.**, arXiv:1303.6485 | GCC-flag energy search | ARM | best flag is not portable | Supports OptiFine's per-ISA calibration stance; argues against exporting savings numbers across toolchains. |
@@ -187,9 +202,9 @@ finding within active mode. Reporting Phase A as a Phase-A-vs-TinyML
 1. L. Heim, A. Biri, Z. Qu, L. Thiele, "Measuring what Really Matters:
    Optimizing Neural Networks for TinyML," arXiv:2104.10645, 2021.
    https://doi.org/10.48550/arxiv.2104.10645
-2. L. Huang and M. Ghiasi, "A compiler-directed energy-aware approach to
-   reduction of peak and average power" / effective mode switching, ACM
-   TODAES 12(3), 2007. doi:10.1145/1255456.1255464
+2. P.-K. Huang and S. Ghiasi, "Efficient and Scalable Compiler-Directed
+   Energy Optimization for Realtime Applications," ACM TODAES 12(3),
+   Article 27, 2007. doi:10.1145/1255456.1255464
 3. C.-H. Hsu and U. Kremer, "The design, implementation, and evaluation of a
    compiler algorithm for CPU energy reduction," PLDI 2003.
 4. L. Wanner et al., "Variability-aware duty cycle scheduling in low power
@@ -202,9 +217,10 @@ finding within active mode. Reporting Phase A as a Phase-A-vs-TinyML
 7. M. Lee, V. Tiwari, S. Malik, M. Fujita, "Power analysis and minimization
    techniques for embedded DSP software," IEEE TVLSI 5(3), 1997.
    doi:10.1109/92.555992
-8. S. Surakka et al., "A study of measuring and minimizing power consumption
-   at the instruction level," Estonian J. Eng. 11(4), 2005.
-   doi:10.3176/eng.2005.4.07
+8. K. Surakka, T. Mikkonen, H.-M. Jarvinen, T. Vuorela, J. Vanhala,
+   "Towards Compiler Backend Optimization for Low Energy Consumption at
+   Instruction Level," Proceedings of the Estonian Academy of Sciences,
+   Engineering, 11(4), 347-357, 2005. doi:10.3176/eng.2005.4.07
 9. J. Pallister, S. Hollis, J. Bennett, "Identifying compiler options to
    minimize energy consumption for embedded platforms," arXiv:1303.6485,
    2013.
@@ -214,3 +230,12 @@ finding within active mode. Reporting Phase A as a Phase-A-vs-TinyML
     https://ww1.microchip.com/downloads/en/DeviceDoc/AVR-InstructionSet-Manual-DS40002198.pdf
 12. Microchip/Atmel, "Using the AVR's sleep modes" app notes (e.g. AVR42787);
     Atmel AVR sleep-mode RTC wake documentation.
+13. Atmel/Microchip, "ATmega128/L 8-bit AVR Microcontroller with 128KBytes
+    In-System Programmable Flash" device datasheet. The normative source
+    for every device-specific mechanism Phase B depends on: Power-save
+    sleep mode and the MCUCR SM2:0 encoding, Timer/Counter0 asynchronous
+    operation via ASSR.AS0, the Timer0 overflow interrupt and its
+    prescaler divisors, and the device's SRAM/flash sizes. Cited for
+    *semantics*, not for energy: this project's per-cycle constants come
+    from Avrora's model (SOURCES.md), not from the datasheet's electrical
+    characteristics tables.

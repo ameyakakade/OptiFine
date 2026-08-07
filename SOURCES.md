@@ -1,7 +1,9 @@
 # Sources
 
 Every entry in `cost_table.toml` must be justified by an entry here before
-its `PLACEHOLDER` marker is removed. No physically-measured numbers are
+it is treated as real. As of the milestone-6 sourcing pass no `PLACEHOLDER`
+entries remain: all 9 table entries carry an Avrora-derived figure and a
+citation. No physically-measured numbers are
 permitted anywhere in this project (see spec section 3) -- only cited
 published figures (datasheet, paper) or Avrora's simulated energy monitor.
 
@@ -21,8 +23,10 @@ CPU active mode. Every `energy_nj` figure below is therefore:
 energy_nj = cycles(instruction) x per_cycle_energy_nj
 ```
 
-where `per_cycle_energy_nj` is a single constant derived from a real
-datasheet figure, and `cycles(instruction)` comes from the AVR Instruction
+where `per_cycle_energy_nj` is a single constant calibrated to Avrora's
+own ATmega128 power model (see "Per-cycle energy constant" below -- an
+earlier revision of this file derived it from a datasheet figure instead,
+and that is superseded), and `cycles(instruction)` comes from the AVR Instruction
 Set Manual. This still captures a real physical effect (LD_SRAM/ST_SRAM/MUL
 cost 2x a register op because they take 2x as many cycles), just not via
 per-opcode current variation, because no cited source establishes that
@@ -58,7 +62,7 @@ independently-generated programs (`bringup_smoke.s`: 22.7001 nJ / 8 cycles
   `avrora.jar` ships no readable source or resource file with these
   values, only compiled `.class` files -- see reproduction steps below).
 - **Why this constant instead of the datasheet's:** Avrora is this
-  project's ground-truth benchmark (spec section on tooling) -- every
+  project's simulation reference (spec section on tooling) -- every
   reported cycle/energy number in REPORT.md ultimately comes from Avrora's
   simulation, not from the compiler's own predicted numbers. Calibrating
   `cost_table.toml` to Avrora's own internal assumption makes the

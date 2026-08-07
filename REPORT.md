@@ -12,6 +12,49 @@ the implementation task breakdown; `documents/LITERATURE_SURVEY.md` has
 the full related-work positioning summarized in this report's Phase B
 section below.
 
+## Abstract
+
+In 2021, Heim, Biri, Qu and Thiele measured neural-network inference across
+a range of ARM Cortex-M microcontrollers (STM32 L4/F4/F7) with an external
+energy monitor and reported a near-perfect linear correlation between
+latency and energy — r = 0.9946 across whole-network optimizations,
+r = 0.9995 at the individual-layer level. They concluded that "the
+inference latency is a perfect proxy for the energy consumption of the
+investigated MCUs." If that holds generally, energy-aware compilation is a
+solved problem: optimize for speed, and energy follows for free.
+
+OptiFine is an energy-aware compiler backend built to locate the boundary
+of that equivalence. The finding is that it holds precisely as long as the
+processor never leaves Active mode — and fails the moment it does.
+
+The project does not dispute their measurement. Its first phase
+corroborates it: an energy-cost model driving instruction selection and
+next-use register allocation reduces exactly to cycles times a constant,
+and its 1.83% simulated saving is a pure cycle reduction — the only lever
+their regime predicts is available. The divergence appears in the second
+phase, where the compiler itself schedules sleep-state entry around a
+periodic workload. On a calibrated ATmega128 model, an Active cycle costs
+2.8375 nJ and a Power-save cycle 0.0464 nJ — a ratio of 61.2x. Latency and
+energy decouple: idle duration is unbounded while its energy cost is
+bounded by sleep current, yielding 96.3% savings at a ~98% idle fraction.
+The two phases also interact — the 112-cycle saving from the first is
+worth 312.6 nJ per inference under sleep scheduling and exactly zero under
+busy-wait, making the sleep-aware compiler the precondition for the
+instruction-level optimization being observable at all.
+
+The same backend targets two structurally different workload classes —
+INT8 neural-network inference and a fixed-point streaming DSP pipeline
+(64-point FFT, Q15) — so the result can be tested against computational
+shape rather than a single benchmark. The DSP path is currently in
+implementation; all figures reported above are from the ML workload.
+
+This is a structural argument about the generality of a claim, not a
+competing measurement: it is established in a cycle-accurate simulator,
+whereas the result it contests was taken on physical hardware. Closing
+that gap — on both AVR silicon and an STM32 target of the same
+architectural family Heim et al. measured — is deferred Phase 2 work
+(spec v2 section 2).
+
 ## Methodology
 
 Pipeline: ONNX (hand-authored quantized graph, `export/export_model.py`) ->
@@ -218,8 +261,8 @@ is **312.606 nJ per inference, exactly, at every accepted prescaler**:
 This is not a coincidence -- it is Phase A's 112-cycle saving (confirmed
 from the steady-state increments: naive 5,530 active cycles/inference vs.
 optimized 5,418, a 112-cycle difference, matching milestone 5's own
-Avrora-measured saving in the Results section above) times the measured
-active/Power-save per-cycle energy gap. Both per-cycle rates were
+Avrora-simulated saving in the Results section above) times the
+simulator's active/Power-save per-cycle energy gap. Both per-cycle rates were
 re-derived independently from the raw CSV for this write-up (not merely
 repeated from `cost_table.toml`): active = 23,244.9024 nJ / 8,192 cycles
 = 2.8375125 nJ/cycle (matches the cost table's 2.8375 rounded constant);
