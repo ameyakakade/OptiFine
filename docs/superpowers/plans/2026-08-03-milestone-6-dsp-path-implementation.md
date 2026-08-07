@@ -2297,7 +2297,9 @@ GIT_AUTHOR_DATE="2026-08-11T09:00:00+05:30" GIT_COMMITTER_DATE="2026-08-11T09:00
 
 **Files:**
 - Modify: `compiler/src/codegen/periodic.c`
+- Modify: `compiler/src/codegen/lower.c`
 - Modify: `compiler/tests/test_periodic.c`
+- Modify: `compiler/tests/test_dsp_lower.c`
 
 **Interfaces:**
 - Modifies: `periodic_output_addr` (file-local `static`, unchanged
@@ -2307,6 +2309,11 @@ GIT_AUTHOR_DATE="2026-08-11T09:00:00+05:30" GIT_COMMITTER_DATE="2026-08-11T09:00
   path's* expected byte count specifically, with the DSP path's real
   byte count (`DSP_MAX_PEAKS * 2 == 16`) computed instead of compared
   against that constant.
+- Modifies: `lower_output` (`lower.c`, file-local `static`) to stride by
+  `sram_layout_elem_size(op->dtype)` instead of assuming 1 byte per
+  element. Folded into this task because it is the *same* defect in the
+  same output path, found by the Task 5 review -- see the amendment note
+  below.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2447,6 +2454,73 @@ becomes `output_bytes` instead of the constant, and the `; META
 output_addr=... output_len=4` comment format string becomes `output_len=%zu`
 with `output_bytes` substituted in.
 
+**Amendment (added after the Task 5 review, 2026-08-07): `lower_output`
+has the identical defect and nothing else in this plan fixes it.**
+
+`lower_output` copies its producer's bytes with a hardcoded 1-byte
+stride (`in_addr + i` over `n = sram_layout_num_elements(op)`). That is
+correct for the ML path, whose `OP_OUTPUT` is `DT_INT8`, and silently
+wrong for the DSP path, whose `OP_OUTPUT` is `DT_FIXED_Q15`. Measured on
+the real DSP graph: `num_elem = 8`, `elem_size = 2`, so 16 bytes are
+needed, and `lower_output` emits 16 instructions -- 8 `lds`/`sts` pairs,
+i.e. **8 bytes, exactly half**. The emitted peak list would carry peaks
+0-3 and leave 4-7 as whatever the layout happened to hold.
+
+This is the same 1-byte-per-element assumption the 2026-08-03 spec
+amendment (item 4) caught in `periodic_output_addr`, but the amendment
+named only `periodic.c`, so `lower_output` was never scheduled for a
+fix. Left alone it would surface at Task 12's `numpy.fft` gate -- after
+eleven tasks of working primitives, at the single hardest point to trace
+back to a cause.
+
+In `compiler/src/codegen/lower.c`, change `lower_output`'s byte count to
+match the same `elem_size` arithmetic Task 4 already applied to
+`OP_INPUT`:
+
+```c
+    /* Byte count, not element count: OP_OUTPUT is a flat byte copy, and
+     * the DSP path's output is DT_FIXED_Q15 (2 bytes/element), not the
+     * ML path's DT_INT8. Same fix as lower_op's OP_INPUT length check.
+     * Non-regressive for the ML path, where elem_size == 1. */
+    size_t n = sram_layout_num_elements(op) * sram_layout_elem_size(op->dtype);
+```
+
+and add a regression test to `compiler/tests/test_dsp_lower.c` asserting
+the emitted instruction count, so the stride cannot silently revert:
+
+```c
+static void test_lower_output_copies_full_q15_width(void) {
+    CostModel cost_model;
+    assert(cost_model_load("cost_table.toml", &cost_model) == 0);
+    IrGraph graph;
+    assert(dsp_build_pipeline(&graph) == 0);
+    SramLayout layout;
+    assert(sram_layout_build(&graph, &layout) == 0);
+    RegAllocResult regalloc;
+    assert(regalloc_next_use(&graph, &regalloc) == 0);
+
+    size_t out_id = graph.count - 1;
+    assert(graph.ops[out_id].kind == OP_OUTPUT);
+    size_t want_bytes = sram_layout_num_elements(&graph.ops[out_id]) *
+                        sram_layout_elem_size(graph.ops[out_id].dtype);
+    assert(want_bytes == DSP_MAX_PEAKS * 2);
+
+    Candidate c;
+    assert(lower_op(&graph, out_id, &layout, &regalloc, &cost_model, NULL, 0, &c) == 0);
+    assert_priced(&c);
+    /* one lds + one sts per byte copied */
+    assert(c.num_instructions == want_bytes * 2);
+
+    candidate_free(&c);
+    regalloc_result_free(&regalloc);
+    sram_layout_free(&layout);
+    ir_graph_free(&graph);
+}
+```
+
+Verify the ML path is unaffected: `test_lower`'s end-to-end golden-output
+comparison already covers `DT_INT8` `OP_OUTPUT`, and must stay green.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
@@ -2464,7 +2538,8 @@ before this task).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add compiler/src/codegen/periodic.c compiler/tests/test_periodic.c compiler/tests/CMakeLists.txt
+git add compiler/src/codegen/periodic.c compiler/src/codegen/lower.c \
+        compiler/tests/test_periodic.c compiler/tests/test_dsp_lower.c compiler/tests/CMakeLists.txt
 GIT_AUTHOR_DATE="2026-08-11T15:40:00+05:30" GIT_COMMITTER_DATE="2026-08-11T15:40:00+05:30" \
   git commit -m "[Compiler]- Support DT_FIXED_Q15 output in the periodic scheduler wrapper"
 ```
