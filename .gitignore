@@ -1,6 +1,10 @@
 compiler/build/
 compiler/build_check/
 compiler/build*/
+# Local demo/scratch output. Canonical experimental artifacts live in
+# sim/fixtures/ and are tracked deliberately; anything under build/ is
+# regenerable and must never be confused with retained evidence.
+/build/
 *.o
 *.elf
 __pycache__/
