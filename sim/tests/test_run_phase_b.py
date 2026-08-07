@@ -226,5 +226,118 @@ startup:
             self.assertEqual(before, {path.name: path.read_bytes() for path in tracked})
 
 
+
+class PhaseBModeSeparationTests(unittest.TestCase):
+    """The three modes are separate contracts, not one overloaded entry point."""
+
+    def test_command_identity_survives_the_recording_machines_path_style(self):
+        """The same command recorded on Windows and rebuilt on Linux must agree.
+
+        Note the tool argument itself is NOT normalised away: `optifine.exe`
+        and `optifine` are genuinely different names, and the caller always
+        rebuilds the expected command using the *recorded* tool path, so
+        element 0 matches by construction rather than by leniency.
+        """
+        tool = r"D:\_CODING\OptiFine\optifine.exe"
+        windows = [
+            tool, r"D:\_CODING\OptiFine\models\m.onnx",
+            "--cost-table", r"D:\_CODING\OptiFine\cost_table.toml",
+            "--out", r"D:\_CODING\OptiFine\sim\fixtures\phase_b\p32_naive_active.S",
+            "--timer-prescaler", "32",
+        ]
+        posix = [
+            tool, "/home/u/OptiFine/models/m.onnx",
+            "--cost-table", "/home/u/OptiFine/cost_table.toml",
+            "--out", "/home/u/OptiFine/sim/fixtures/phase_b/p32_naive_active.S",
+            "--timer-prescaler", "32",
+        ]
+        self.assertEqual(run_phase_b.command_identity(windows),
+                         run_phase_b.command_identity(posix))
+
+    def test_command_identity_still_rejects_a_changed_flag_value(self):
+        base = ["/o/optifine", "/o/m.onnx", "--timer-prescaler", "32"]
+        other = ["/o/optifine", "/o/m.onnx", "--timer-prescaler", "128"]
+        self.assertNotEqual(run_phase_b.command_identity(base),
+                            run_phase_b.command_identity(other))
+
+    def test_command_identity_still_rejects_a_different_input_file(self):
+        base = ["/o/optifine", "/o/models/m.onnx", "--timer-prescaler", "32"]
+        other = ["/o/optifine", "/o/models/other.onnx", "--timer-prescaler", "32"]
+        self.assertNotEqual(run_phase_b.command_identity(base),
+                            run_phase_b.command_identity(other))
+
+    def test_reproduction_succeeds_when_the_recorded_toolchain_is_absent(self):
+        """The canonical result must not be pinned to the machine that produced it.
+
+        reproduce-retained reads retained assembly and Avrora output; it never
+        invokes the compiler, assembler or simulator, so an absent or differing
+        toolchain is reportable metadata, not grounds for refusal.
+        """
+        source = run_phase_b.ROOT / "sim" / "fixtures" / "phase_b"
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "phase_b"
+            shutil.copytree(source, copied)
+            # No mutation needed: the canonical manifest records the Windows
+            # paths of the machine that produced it, which are absent here.
+            # That is precisely the situation this mode must tolerate.
+            output = io.StringIO()
+            with patch.object(run_phase_b, "execute", side_effect=AssertionError("tool process started")), \
+                    redirect_stdout(output):
+                exit_code = run_phase_b.main(["reproduce-retained", "--output-dir", str(copied)])
+
+            self.assertEqual(0, exit_code)
+            self.assertIn("not present on this machine", output.getvalue())
+            self.assertIn("ARTIFACT-level reproduction", output.getvalue())
+
+    def test_reproduction_still_rejects_a_changed_experimental_input(self):
+        """Scoping the tool gate must not have loosened the input gate."""
+        source = run_phase_b.ROOT / "sim" / "fixtures" / "phase_b"
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "phase_b"
+            shutil.copytree(source, copied)
+            manifest = json.loads((copied / "manifest.json").read_text(encoding="utf-8"))
+            manifest["inputs"]["model"]["sha256"] = "0" * 64
+            (copied / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+            errors = io.StringIO()
+            with redirect_stderr(errors):
+                exit_code = run_phase_b.main(["reproduce-retained", "--output-dir", str(copied)])
+
+            self.assertEqual(2, exit_code)
+            self.assertIn("model hash does not match", errors.getvalue())
+
+    def test_run_new_refuses_to_overwrite_an_existing_experiment(self):
+        source = run_phase_b.ROOT / "sim" / "fixtures" / "phase_b"
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "phase_b"
+            shutil.copytree(source, copied)
+            before = (copied / "manifest.json").read_bytes()
+            errors = io.StringIO()
+            with patch.object(run_phase_b, "execute", side_effect=AssertionError("tool process started")), \
+                    redirect_stderr(errors):
+                exit_code = run_phase_b.main(["run-new", "--output-dir", str(copied)])
+
+            self.assertEqual(2, exit_code)
+            self.assertIn("refuses to overwrite", errors.getvalue())
+            self.assertEqual(before, (copied / "manifest.json").read_bytes())
+
+    def test_supplemental_refuses_the_canonical_fixture_directory(self):
+        errors = io.StringIO()
+        with patch.object(run_phase_b, "execute", side_effect=AssertionError("tool process started")), \
+                redirect_stderr(errors):
+            exit_code = run_phase_b.main(["supplemental"])
+
+        self.assertEqual(2, exit_code)
+        self.assertIn("canonical fixture directory", errors.getvalue())
+
+    def test_reproduce_retained_on_a_fresh_directory_points_at_run_new(self):
+        with tempfile.TemporaryDirectory() as directory:
+            errors = io.StringIO()
+            with redirect_stderr(errors):
+                exit_code = run_phase_b.main(["reproduce-retained", "--output-dir", directory])
+
+            self.assertEqual(2, exit_code)
+            self.assertIn("run-new", errors.getvalue())
+
 if __name__ == "__main__":
     unittest.main()

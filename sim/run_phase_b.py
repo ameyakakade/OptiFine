@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import StringIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable, Sequence
 
 from compare_phase_b import (
@@ -497,6 +497,38 @@ def same_path(left: str, right: str) -> bool:
     return os.path.normcase(str(Path(left).resolve())) == os.path.normcase(str(Path(right).resolve()))
 
 
+def _looks_like_path(token: str) -> bool:
+    return "/" in token or "\\" in token
+
+
+def command_identity(command: Sequence[str]) -> list[str]:
+    """A command reduced to what is portable across machines.
+
+    Retained commands record absolute paths from the machine that produced
+    them (``D:\\_CODING\\...``, ``C:\\Users\\...``).  Comparing those against
+    paths rebuilt on another machine can only ever fail, which would make a
+    canonical experiment reproducible on exactly one computer.  What actually
+    carries identity is the *shape*: which flags, in which order, naming which
+    files.  Path-valued arguments therefore compare by basename, handling both
+    separators so a Windows-recorded command and a POSIX-rebuilt one reduce to
+    the same thing.  Flags and literal values (counts, policies, prescalers)
+    still compare verbatim -- nothing about the experiment's identity is
+    relaxed, only the machine it happened to run on.
+    """
+    reduced: list[str] = []
+    for token in command:
+        if _looks_like_path(token):
+            reduced.append(PureWindowsPath(token).name if "\\" in token else PurePosixPath(token).name)
+        else:
+            reduced.append(token)
+    return reduced
+
+
+def require_command_identity(recorded: Any, expected: Sequence[str], label: str) -> None:
+    if not isinstance(recorded, list) or command_identity(recorded) != command_identity(expected):
+        raise ProvenanceError(f"retained {label} command differs from observation identity")
+
+
 def strict_json_equal(left: Any, right: Any) -> bool:
     if type(left) is not type(right):
         return False
@@ -573,20 +605,17 @@ def validate_recorded_provenance(spec: RunSpec, entry: dict[str, Any],
         manifest_record_path(inputs["input"]["path"]),
         manifest_record_path(paths["assembly"]),
     )
-    if commands.get("compiler") != compiler_expected:
-        raise ProvenanceError("retained compiler command differs from observation identity")
+    require_command_identity(commands.get("compiler"), compiler_expected, "compiler")
     assembler_expected = [
         tools["avr_gcc"]["path"], "-mmcu=atmega128", "-nostartfiles", "-o",
         str(manifest_record_path(paths["elf"])), str(manifest_record_path(paths["assembly"])),
     ]
-    if commands.get("avr_gcc") != assembler_expected:
-        raise ProvenanceError("retained avr-gcc command differs from target identity")
+    require_command_identity(commands.get("avr_gcc"), assembler_expected, "avr-gcc")
     avrora_expected = [
         tools["java"]["path"], "-jar", tools["avrora"]["path"], "-monitors=energy",
         "-mcu=atmega128", str(manifest_record_path(paths["elf"])),
     ]
-    if commands.get("avrora") != avrora_expected:
-        raise ProvenanceError("retained Avrora command differs from target identity")
+    require_command_identity(commands.get("avrora"), avrora_expected, "Avrora")
 
 
 def observation_artifact_paths(output_dir: Path, entry: dict[str, Any]) -> tuple[Path, Path]:
@@ -622,14 +651,47 @@ def validate_observation_artifacts(spec: RunSpec, entry: dict[str, Any], output_
     return assembly, report
 
 
-def validate_current_environment(manifest: dict[str, Any]) -> None:
-    """Check recorded model/input/tool identities without starting any tool."""
+def validate_recorded_inputs(manifest: dict[str, Any]) -> None:
+    """Check the target and every recorded experimental input, starting no tool.
+
+    These are the files a reproduction actually consumes -- the model, the
+    golden input and output, the cost table -- so a mismatch here means the
+    experiment's *data* changed underneath the retained artifacts and nothing
+    downstream can be trusted.  This gate is mandatory in every mode.
+    """
     if manifest.get("target") != "atmega128":
         raise ProvenanceError("manifest target must be atmega128")
     for label, record in manifest.get("inputs", {}).items():
         path = manifest_record_path(record["path"])
         if not path.is_file() or sha256_file(path) != record.get("sha256"):
             raise ProvenanceError(f"recorded {label} hash does not match current file")
+
+
+def describe_tool_environment(manifest: dict[str, Any]) -> list[tuple[str, str]]:
+    """Report, per tool, whether this machine holds the byte-identical binary.
+
+    Deliberately a report rather than a gate.  ``reproduce-retained`` reads
+    retained assembly and Avrora output and recomputes hashes over them; it
+    never invokes the compiler, the assembler or the simulator, so requiring
+    those binaries to be byte-identical would refuse a perfectly sound
+    reproduction for a reason that has no bearing on it -- and would pin the
+    canonical result to a single machine.  ``run-new`` and ``supplemental`` do
+    run the tools, and record the hashes of whichever ones they actually used.
+    """
+    rows: list[tuple[str, str]] = []
+    for label, record in sorted(manifest.get("tools", {}).items()):
+        path = Path(record["path"])
+        if not path.is_file():
+            rows.append((label, "not present on this machine"))
+        elif sha256_file(path) != record.get("sha256"):
+            rows.append((label, "present but differs from the recorded binary"))
+        else:
+            rows.append((label, "byte-identical to the recorded binary"))
+    return rows
+
+
+def require_recorded_tools_present(manifest: dict[str, Any]) -> None:
+    """Hard gate for modes that re-execute the recorded toolchain."""
     for label, record in manifest.get("tools", {}).items():
         path = Path(record["path"])
         if not path.is_file() or sha256_file(path) != record.get("sha256"):
@@ -706,14 +768,15 @@ def primary_entry_from_retained(spec: RunSpec, retained: dict[str, Any], output_
 
 def supplemental_entry(spec: RunSpec, output_dir: Path, tools: ToolPaths, model: Path,
                        cost_table: Path, golden_input: Path, output: list[int],
-                       tool_versions: dict[str, Any], hashes: dict[str, str]) -> dict[str, Any]:
+                       tool_versions: dict[str, Any], hashes: dict[str, str],
+                       run_set: str = "supplemental") -> dict[str, Any]:
     assembly = output_dir / f"{spec.stem}.S"
     elf = output_dir / f"{spec.stem}.elf"
     avrora_output = output_dir / f"{spec.stem}.avrora.txt"
     compiler_cmd = compiler_command(spec, str(tools.compiler), model, cost_table, golden_input, assembly)
     entry: dict[str, Any] = {
         "id": spec.stem,
-        "run_set": "supplemental",
+        "run_set": run_set,
         "timestamp": utc_now(),
         "divisor": spec.divisor,
         "prescaler": spec.divisor,
@@ -914,7 +977,7 @@ def validate_regenerated_tables(output_dir: Path, pairs: list[dict[str, Any]],
 def reproduce_schema_v2(args: argparse.Namespace, manifest: dict[str, Any]) -> int:
     """Revalidate canonical raw artifacts without compiler, assembler, or Avrora calls."""
     output_dir = Path(args.output_dir).resolve()
-    validate_current_environment(manifest)
+    validate_recorded_inputs(manifest)
     primary_specs = build_specs(args.divisors, args.compute_paths, PRIMARY_COUNT)
     supplemental_specs = build_specs(args.divisors, args.compute_paths, SUPPLEMENTAL_COUNT)
     primary_by_id = {entry["id"]: entry for entry in manifest.get("primary_runs", [])}
@@ -937,12 +1000,23 @@ def reproduce_schema_v2(args: argparse.Namespace, manifest: dict[str, Any]) -> i
         f"{len(supplemental_entries)} retained supplemental runs, {accepted_pairs} accepted pairs, "
         f"{rejected_pairs} rejected pairs; no simulator executed and no files written"
     )
+    rows = describe_tool_environment(manifest)
+    identical = sum(1 for _, state in rows if state.startswith("byte-identical"))
+    print("  toolchain vs. the recorded run:")
+    for label, state in rows:
+        print(f"    {label:9s} {state}")
+    if identical != len(rows):
+        print(
+            "  note: this is an ARTIFACT-level reproduction. The retained assembly and\n"
+            "        Avrora output were revalidated byte-for-byte and the result tables\n"
+            "        re-derived from them, but the original toolchain was not re-executed,\n"
+            "        so this does not by itself establish toolchain-level reproducibility."
+        )
     return 0
 
 
-def run_sweep(args: argparse.Namespace) -> int:
+def _load_experiment_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path, Path, Path, list[int]]:
     output_dir = Path(args.output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
     model = Path(args.model).resolve()
     golden_input = Path(args.input).resolve()
     golden_output = Path(args.golden_output).resolve()
@@ -950,19 +1024,29 @@ def run_sweep(args: argparse.Namespace) -> int:
     for required in (model, golden_input, golden_output, cost_table):
         if not required.is_file():
             raise FileNotFoundError(required)
-    output = expected_output_from_fixture(golden_output)
+    return output_dir, model, golden_input, golden_output, cost_table, expected_output_from_fixture(golden_output)
+
+
+def mode_reproduce_retained(args: argparse.Namespace) -> int:
+    """Revalidate a canonical retained experiment. Runs no tool, writes no file."""
+    output_dir, *_ = _load_experiment_inputs(args)
     manifest_path = output_dir / "manifest.json"
     if not manifest_path.is_file():
-        raise FileNotFoundError("retained count-4 manifest is required before the count-5 supplemental sweep")
-    retained_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if retained_manifest.get("schema") == "phase-b-steady-state-v2":
-        return reproduce_schema_v2(args, retained_manifest)
-    raise ProvenanceError(
-        "only a canonical phase-b-steady-state-v2 manifest may be reproduced; "
-        "refusing to rebuild legacy retained provenance"
-    )
-    tools = resolve_tools(args)
-    tool_versions = {
+        raise FileNotFoundError(
+            f"no manifest.json in {output_dir}: reproduce-retained revalidates an existing "
+            "canonical experiment. To produce a new one, use: run-new --output-dir <fresh dir>"
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema") != "phase-b-steady-state-v2":
+        raise ProvenanceError(
+            "only a canonical phase-b-steady-state-v2 manifest may be reproduced; "
+            "refusing to rebuild legacy retained provenance"
+        )
+    return reproduce_schema_v2(args, manifest)
+
+
+def _tool_versions_for(tools: ToolPaths) -> dict[str, Any]:
+    return {
         "compiler": {
             "path": str(tools.compiler),
             "sha256": sha256_file(tools.compiler),
@@ -972,20 +1056,44 @@ def run_sweep(args: argparse.Namespace) -> int:
         "java": tool_record(tools.java, [str(tools.java), "-version"]),
         "avrora": {"path": str(tools.avrora_jar), "sha256": sha256_file(tools.avrora_jar)},
     }
+
+
+def mode_run_new(args: argparse.Namespace) -> int:
+    """Run a complete new experiment with the CURRENT toolchain, into a fresh directory.
+
+    Deliberately refuses a directory that already holds a manifest.  A new
+    experiment and a retained canonical one are different things, and writing
+    one on top of the other would destroy the provenance that makes the
+    retained one worth keeping.  The manifest this writes records the hashes
+    of the tools that actually ran here, so it never claims to reproduce
+    anything -- it is its own experiment, comparable to the canonical one but
+    not a substitute for it.
+    """
+    output_dir, model, golden_input, golden_output, cost_table, output = _load_experiment_inputs(args)
+    manifest_path = output_dir / "manifest.json"
+    if manifest_path.is_file():
+        raise ProvenanceError(
+            f"{manifest_path} already exists: run-new refuses to overwrite an existing "
+            "experiment. Choose a fresh --output-dir, or use reproduce-retained to "
+            "revalidate what is already there."
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tools = resolve_tools(args)
+    tool_versions = _tool_versions_for(tools)
     inputs = input_records(model, golden_input, golden_output, cost_table)
     hashes = input_hashes(inputs)
-    retained_by_id = {entry["id"]: entry for entry in retained_manifest.get("runs", [])}
 
     primary_specs = build_specs(args.divisors, args.compute_paths, PRIMARY_COUNT)
     supplemental_specs = build_specs(args.divisors, args.compute_paths, SUPPLEMENTAL_COUNT)
     primary_entries = [
-        primary_entry_from_retained(spec, retained_by_id[spec.stem], output_dir, output,
-                                    tool_versions, hashes)
+        supplemental_entry(spec, output_dir, tools, model, cost_table, golden_input, output,
+                           tool_versions, hashes, run_set="primary")
         for spec in primary_specs
     ]
     manifest: dict[str, Any] = {
         "schema": "phase-b-steady-state-v2",
         "generated_at": utc_now(),
+        "provenance_kind": "new-experiment",
         "timeout_seconds": TIMEOUT_SECONDS,
         "target": "atmega128",
         "primary_count": PRIMARY_COUNT,
@@ -999,6 +1107,80 @@ def run_sweep(args: argparse.Namespace) -> int:
         "pairs": [],
         "diagnostics": diagnostics_record(output_dir),
     }
+    return _finish_executing_sweep(args, manifest, manifest_path, output_dir, tools, model,
+                                   cost_table, golden_input, output, tool_versions, hashes,
+                                   primary_entries, supplemental_specs, "new sweep",
+                                   primaries_need_avrora=True)
+
+
+def mode_supplemental(args: argparse.Namespace) -> int:
+    """Add the count-5 sweep on top of an existing count-4 manifest in the same directory."""
+    output_dir, model, golden_input, golden_output, cost_table, output = _load_experiment_inputs(args)
+    manifest_path = output_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"no manifest.json in {output_dir}: the count-5 supplemental sweep extends an "
+            "existing count-4 experiment. Produce one first with: run-new --output-dir <fresh dir>"
+        )
+    if output_dir == (ROOT / "sim" / "fixtures" / "phase_b").resolve():
+        raise ProvenanceError(
+            "refusing to run the supplemental sweep into the canonical fixture directory; "
+            "it would overwrite retained artifacts. Copy them to a scratch directory first."
+        )
+    retained_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    validate_recorded_inputs(retained_manifest)
+    require_recorded_tools_present(retained_manifest)
+    tools = resolve_tools(args)
+    tool_versions = _tool_versions_for(tools)
+    inputs = input_records(model, golden_input, golden_output, cost_table)
+    hashes = input_hashes(inputs)
+    retained_by_id = {entry["id"]: entry for entry in retained_manifest.get("runs", [])
+                      or retained_manifest.get("primary_runs", [])}
+
+    primary_specs = build_specs(args.divisors, args.compute_paths, PRIMARY_COUNT)
+    supplemental_specs = build_specs(args.divisors, args.compute_paths, SUPPLEMENTAL_COUNT)
+    primary_entries = [
+        primary_entry_from_retained(spec, retained_by_id[spec.stem], output_dir, output,
+                                    tool_versions, hashes)
+        for spec in primary_specs
+    ]
+    manifest: dict[str, Any] = {
+        "schema": "phase-b-steady-state-v2",
+        "generated_at": utc_now(),
+        "provenance_kind": "supplemental-extension",
+        "timeout_seconds": TIMEOUT_SECONDS,
+        "target": "atmega128",
+        "primary_count": PRIMARY_COUNT,
+        "supplemental_count": SUPPLEMENTAL_COUNT,
+        "expected_output": output,
+        "evidence_limit": TERMINAL_EVIDENCE,
+        "inputs": inputs,
+        "tools": tool_versions,
+        "primary_runs": primary_entries,
+        "supplemental_runs": [],
+        "pairs": [],
+        "diagnostics": diagnostics_record(output_dir),
+    }
+    return _finish_executing_sweep(args, manifest, manifest_path, output_dir, tools, model,
+                                   cost_table, golden_input, output, tool_versions, hashes,
+                                   primary_entries, supplemental_specs, "supplemental sweep")
+
+
+def _finish_executing_sweep(args: argparse.Namespace, manifest: dict[str, Any],
+                            manifest_path: Path, output_dir: Path, tools: ToolPaths,
+                            model: Path, cost_table: Path, golden_input: Path,
+                            output: list[int], tool_versions: dict[str, Any],
+                            hashes: dict[str, str], primary_entries: list[dict[str, Any]],
+                            supplemental_specs: list[RunSpec], label: str,
+                            primaries_need_avrora: bool = False) -> int:
+    """Execute the count-5 sweep, pair it against the count-4 runs, and write results.
+
+    Shared by run-new and supplemental: both end with the same work once their
+    primary (count-4) entries exist, whether those were just executed or read
+    from a retained manifest.  This body was previously unreachable -- it sat
+    after an unconditional ``raise`` in ``run_sweep`` -- so no mode could
+    generate new data at all.
+    """
     supplemental_entries = [
         supplemental_entry(spec, output_dir, tools, model, cost_table, golden_input, output,
                            tool_versions, hashes)
@@ -1034,7 +1216,11 @@ def run_sweep(args: argparse.Namespace) -> int:
             manifest["pairs"].append(pair)
     write_json(manifest_path, manifest)
 
-    for entry in supplemental_entries:
+    # run-new compiles its own count-4 entries, so they still need simulating;
+    # supplemental takes them from a retained manifest that already carries
+    # their reports, and must not re-run them.
+    pending = (primary_entries + supplemental_entries) if primaries_need_avrora else supplemental_entries
+    for entry in pending:
         run_supplemental_avrora(entry, output_dir, tools, manifest["tools"])
     write_json(manifest_path, manifest)
 
@@ -1097,17 +1283,42 @@ def run_sweep(args: argparse.Namespace) -> int:
     accepted_pairs = sum(pair["status"] == "accepted" for pair in manifest["pairs"])
     rejected_pairs = len(manifest["pairs"]) - accepted_pairs
     print(
-        f"phase-b steady-state sweep: {len(primary_entries)} retained primary runs, "
+        f"phase-b steady-state {label}: {len(primary_entries)} primary runs, "
         f"{len(supplemental_entries)} supplemental runs, {accepted_pairs} accepted pairs, "
-        f"{rejected_pairs} rejected pairs"
+        f"{rejected_pairs} rejected pairs -> {manifest_path}"
     )
     return 0
 
+MODES = {
+    "reproduce-retained": mode_reproduce_retained,
+    "run-new": mode_run_new,
+    "supplemental": mode_supplemental,
+}
+
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--dry-run-supplemental", action="store_true")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "modes:\n"
+            "  reproduce-retained  (default) revalidate a canonical retained experiment from its\n"
+            "                      raw artifacts. Starts no tool and writes no file. Reports\n"
+            "                      whether this machine's toolchain matches the recorded one,\n"
+            "                      but does not require it to.\n"
+            "  run-new             run a complete new experiment with the CURRENT toolchain into\n"
+            "                      a fresh --output-dir. Refuses a directory that already holds a\n"
+            "                      manifest. Records the hashes of the tools that actually ran.\n"
+            "  supplemental        extend an existing count-4 experiment with the count-5 sweep,\n"
+            "                      in the same directory. Requires the recorded toolchain.\n"
+        ),
+    )
+    parser.add_argument("mode", nargs="?", default="reproduce-retained", choices=sorted(MODES),
+                        help="what to do (default: reproduce-retained)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the count-4 compiler commands and exit; starts no tool")
+    parser.add_argument("--dry-run-supplemental", action="store_true",
+                        help="print the count-5 compiler commands and exit; starts no tool")
     parser.add_argument("--compiler")
     parser.add_argument("--avr-gcc")
     parser.add_argument("--java")
@@ -1133,7 +1344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(command))
         return 0
     try:
-        return run_sweep(args)
+        return MODES[args.mode](args)
     except (FileNotFoundError, ToolDiscoveryError, ValueError) as error:
         print(f"run_phase_b: {error}", file=sys.stderr)
         return 2
