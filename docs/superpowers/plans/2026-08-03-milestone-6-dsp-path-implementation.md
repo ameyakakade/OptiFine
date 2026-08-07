@@ -1534,14 +1534,50 @@ static void lower_fft_butterfly(InstrBuf *buf, const IrGraph *graph, const SramL
         uint16_t out_q_re = (uint16_t)(out_addr + steps[s].q * 4);
         uint16_t out_q_im = (uint16_t)(out_q_re + 2);
 
-        lower_add16(buf, p_re, DSP_SCRATCH_TRE, out_p_re);
-        lower_asr16(buf, out_p_re, out_p_re);
-        lower_add16(buf, p_im, DSP_SCRATCH_TIM, out_p_im);
-        lower_asr16(buf, out_p_im, out_p_im);
-        lower_sub16(buf, p_re, DSP_SCRATCH_TRE, out_q_re);
-        lower_asr16(buf, out_q_re, out_q_re);
-        lower_sub16(buf, p_im, DSP_SCRATCH_TIM, out_q_im);
-        lower_asr16(buf, out_q_im, out_q_im);
+        /* Halve BEFORE combining, not after. `a + t` reaches 2.0 in Q15
+         * whenever |a| and |t| both approach 1.0, and lower_add16 is a
+         * plain wrapping 16-bit add -- it wraps int16 before an
+         * after-the-fact lower_asr16 ever gets to halve it, so the /2
+         * scaling that is supposed to bound growth would instead be
+         * applied to an already-corrupted sum. Scaling each operand
+         * first keeps every intermediate in range by construction.
+         *
+         * This costs at most one extra LSB of truncation per output
+         * (each asr16 floors toward -inf) and exactly zero extra
+         * instructions: four primitive calls per component either way,
+         * two asr16 + one add16 + one sub16 instead of two add/sub +
+         * two asr16. It also adds no scratch cells, so Task 2's
+         * already-committed DSP_SCRATCH_BYTES = 180 stays correct --
+         * `out_q_*` doubles as the cell holding a/2 until the sub16
+         * overwrites it with its own final value (that self-aliased
+         * sub16 is safe: lower_sub16 stores byte 0 before it loads byte
+         * 1), and TRE/TIM are dead after this block, so they are halved
+         * in place.
+         *
+         * Established empirically, not by argument: simulating the full
+         * 6-stage pipeline against a direct DFT reference shows the
+         * after-the-fact ordering overflows 7 butterflies on a
+         * 0.99-amplitude sinusoid and misses Task 12's tolerance by 14x
+         * (worst top-8 error 7031 against a bound of 500), and
+         * overflows 32 butterflies on a full-scale input (error 2149).
+         * With this ordering neither case overflows at all. The cost is
+         * confined to precision and is negligible: the demo signal's own
+         * worst top-8 error moves from 1.6 to 2.7 against that same
+         * bound of 500, and Step 1's stage-0 assertions are unaffected
+         * (worst deviation 1.00 LSB either way, bound 4.0). Note that
+         * the demo signal never trips the overflow itself -- peak |x| is
+         * 0.477 -- so Task 12's gate would have passed with the defect
+         * still present. That is the reason to fix it here rather than
+         * wait for a test to catch it. */
+        lower_asr16(buf, p_re, out_q_re);
+        lower_asr16(buf, DSP_SCRATCH_TRE, DSP_SCRATCH_TRE);
+        lower_add16(buf, out_q_re, DSP_SCRATCH_TRE, out_p_re);
+        lower_sub16(buf, out_q_re, DSP_SCRATCH_TRE, out_q_re);
+
+        lower_asr16(buf, p_im, out_q_im);
+        lower_asr16(buf, DSP_SCRATCH_TIM, DSP_SCRATCH_TIM);
+        lower_add16(buf, out_q_im, DSP_SCRATCH_TIM, out_p_im);
+        lower_sub16(buf, out_q_im, DSP_SCRATCH_TIM, out_q_im);
     }
 }
 ```
