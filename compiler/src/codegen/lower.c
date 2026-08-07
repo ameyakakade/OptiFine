@@ -517,7 +517,12 @@ static void lower_window(InstrBuf *buf, const IrGraph *graph, const SramLayout *
 static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *layout, size_t op_id) {
     const IrOp *op = &graph->ops[op_id];
     size_t producer_id = op->inputs[0];
-    size_t n = sram_layout_num_elements(op);
+    /* Byte count, not element count: OP_OUTPUT is a flat byte copy, and the
+     * DSP path's output is DT_FIXED_Q15 (2 bytes/element), not the ML path's
+     * DT_INT8. With a bare element count this copied exactly half the DSP
+     * peak list. Same elem_size fix lower_op's OP_INPUT length check already
+     * applies, and non-regressive for the ML path where elem_size == 1. */
+    size_t n = sram_layout_num_elements(op) * sram_layout_elem_size(op->dtype);
     uint16_t in_addr = sram_layout_addr(layout, graph, producer_id, 0);
     uint16_t out_addr = sram_layout_addr(layout, graph, op_id, 0);
     char r[AVR_OPERAND_LEN];

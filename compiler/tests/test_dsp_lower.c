@@ -143,11 +143,46 @@ static void test_lower_window_op(void) {
     ir_graph_free(&graph);
 }
 
+/* Regression guard for the OP_OUTPUT byte-width defect: lower_output used a
+ * bare element count, so the DSP path's DT_FIXED_Q15 peak list (8 elements,
+ * 2 bytes each) was copied 8 bytes instead of 16 -- exactly half, silently.
+ * Asserting the emitted instruction count pins the stride so it cannot
+ * revert without a test failure. */
+static void test_lower_output_copies_full_q15_width(void) {
+    CostModel cost_model;
+    assert(cost_model_load("cost_table.toml", &cost_model) == 0);
+    IrGraph graph;
+    assert(dsp_build_pipeline(&graph) == 0);
+    SramLayout layout;
+    assert(sram_layout_build(&graph, &layout) == 0);
+    RegAllocResult regalloc;
+    assert(regalloc_next_use(&graph, &regalloc) == 0);
+
+    size_t out_id = graph.count - 1;
+    assert(graph.ops[out_id].kind == OP_OUTPUT);
+    assert(graph.ops[out_id].dtype == DT_FIXED_Q15);
+    size_t want_bytes = sram_layout_num_elements(&graph.ops[out_id]) *
+                        sram_layout_elem_size(graph.ops[out_id].dtype);
+    assert(want_bytes == DSP_MAX_PEAKS * 2);
+
+    Candidate c;
+    assert(lower_op(&graph, out_id, &layout, &regalloc, &cost_model, NULL, 0, &c) == 0);
+    assert_priced(&c);
+    /* one lds + one sts per byte copied */
+    assert(c.num_instructions == want_bytes * 2);
+
+    candidate_free(&c);
+    regalloc_result_free(&regalloc);
+    sram_layout_free(&layout);
+    ir_graph_free(&graph);
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     test_fixed_mul_q15_against_known_products();
     test_lower_window_op();
+    test_lower_output_copies_full_q15_width();
     printf("test_dsp_lower: all tests passed\n");
     return 0;
 }
