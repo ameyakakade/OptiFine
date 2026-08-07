@@ -6,6 +6,7 @@
 
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/lower.h"
+#include "optifine/codegen/regalloc.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -81,10 +82,72 @@ static void test_fixed_mul_q15_against_known_products(void) {
     check_one_multiply(&cost_model, -1.0, 1.0 - 1.0 / 32768.0);
 }
 
+static void test_lower_window_op(void) {
+    CostModel cost_model;
+    assert(cost_model_load("cost_table.toml", &cost_model) == 0);
+
+    IrGraph graph;
+    assert(dsp_build_pipeline(&graph) == 0);
+    SramLayout layout;
+    assert(sram_layout_build(&graph, &layout) == 0);
+    RegAllocResult regalloc;
+    assert(regalloc_next_use(&graph, &regalloc) == 0);
+
+    /* raw_input = op 0; write a known Q15 signal (all 0.25) directly into
+     * its SRAM slot via a real lower_op(OP_INPUT) call, matching how the
+     * real pipeline populates it. */
+    int16_t signal[DSP_FFT_SIZE];
+    for (int i = 0; i < DSP_FFT_SIZE; i++) signal[i] = q15_of(0.25);
+
+    AvrInterp interp;
+    avr_interp_init(&interp);
+
+    Candidate zero_init;
+    assert(lower_init_zero_reg(&cost_model, &zero_init) == 0);
+    assert(avr_interp_run(&interp, &zero_init) == 0);
+    candidate_free(&zero_init);
+
+    Candidate input_c;
+    assert(lower_op(&graph, 0, &layout, &regalloc, &cost_model,
+                     (const int8_t *)signal, sizeof(signal), &input_c) == 0);
+    assert_priced(&input_c);
+    assert(avr_interp_run(&interp, &input_c) == 0);
+    candidate_free(&input_c);
+
+    Candidate const_c;
+    assert(lower_op(&graph, 1, &layout, &regalloc, &cost_model, NULL, 0, &const_c) == 0);
+    assert_priced(&const_c);
+    assert(avr_interp_run(&interp, &const_c) == 0);
+    candidate_free(&const_c);
+
+    Candidate window_c;
+    assert(lower_op(&graph, 2, &layout, &regalloc, &cost_model, NULL, 0, &window_c) == 0);
+    assert_priced(&window_c);
+    assert(avr_interp_run(&interp, &window_c) == 0);
+
+    const int16_t *host_coeffs = (const int16_t *)graph.ops[1].data;
+    uint16_t out_addr = sram_layout_addr(&layout, &graph, 2, 0);
+    for (int i = 0; i < DSP_FFT_SIZE; i++) {
+        int16_t raw = (int16_t)((uint16_t)interp.mem[out_addr + i * 2] |
+                                 ((uint16_t)interp.mem[out_addr + i * 2 + 1] << 8));
+        double actual = (double)raw / 32768.0;
+        double expected = 0.25 * ((double)host_coeffs[i] / 32768.0);
+        double diff = actual - expected;
+        if (diff < 0) diff = -diff;
+        assert(diff < (2.0 / 32768.0));
+    }
+
+    candidate_free(&window_c);
+    regalloc_result_free(&regalloc);
+    sram_layout_free(&layout);
+    ir_graph_free(&graph);
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     test_fixed_mul_q15_against_known_products();
+    test_lower_window_op();
     printf("test_dsp_lower: all tests passed\n");
     return 0;
 }

@@ -16,6 +16,9 @@ target_include_directories(test_dsp_build PRIVATE ${CMAKE_SOURCE_DIR}/include)
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     target_compile_definitions(test_dsp_build PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+if(UNIX)
+    target_link_libraries(test_dsp_build PRIVATE m)
+endif()
 add_test(NAME test_dsp_build COMMAND test_dsp_build)
 
 add_executable(test_avr_interp_opcodes test_avr_interp_opcodes.c
@@ -90,6 +93,7 @@ add_executable(test_dsp_lower test_dsp_lower.c
     ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
     ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
     ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/regalloc.c
 )
 target_include_directories(test_dsp_lower PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
@@ -109,6 +113,12 @@ add_executable(test_sram_layout_dsp test_sram_layout_dsp.c
 target_include_directories(test_sram_layout_dsp PRIVATE ${CMAKE_SOURCE_DIR}/include)
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     target_compile_definitions(test_sram_layout_dsp PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    # dsp_build.c calls cos/lround to bake the Hamming window at compile
+    # time, so every target compiling it needs libm -- this one too, not
+    # just the tests that call libm from their own code.
+    target_link_libraries(test_sram_layout_dsp PRIVATE m)
 endif()
 add_test(NAME test_sram_layout_dsp COMMAND test_sram_layout_dsp)
 

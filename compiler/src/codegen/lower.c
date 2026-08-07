@@ -496,6 +496,22 @@ int lower_fixed_mul_q15_test_hook(uint16_t a_addr, uint16_t b_addr, uint16_t out
     return instrbuf_price(&buf, cost_model, out);
 }
 
+/* ---- OP_WINDOW: elementwise Q15 multiply by a fixed window ---- */
+
+static void lower_window(InstrBuf *buf, const IrGraph *graph, const SramLayout *layout, size_t op_id) {
+    const IrOp *op = &graph->ops[op_id];
+    size_t sample_id = op->inputs[0];
+    size_t coeffs_id = op->inputs[1];
+    size_t n = sram_layout_num_elements(op);
+    uint16_t sample_addr = sram_layout_addr(layout, graph, sample_id, 0);
+    uint16_t coeffs_addr = sram_layout_addr(layout, graph, coeffs_id, 0);
+    uint16_t out_addr = sram_layout_addr(layout, graph, op_id, 0);
+    for (size_t i = 0; i < n; i++) {
+        lower_fixed_mul_q15(buf, (uint16_t)(sample_addr + i * 2), (uint16_t)(coeffs_addr + i * 2),
+                             (uint16_t)(out_addr + i * 2));
+    }
+}
+
 /* ---- OP_OUTPUT: copy to a fixed, dedicated address ---- */
 
 static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *layout, size_t op_id) {
@@ -687,6 +703,9 @@ int lower_op(const IrGraph *graph, size_t op_id,
             break;
         case OP_OUTPUT:
             lower_output(&buf, graph, layout, op_id);
+            break;
+        case OP_WINDOW:
+            lower_window(&buf, graph, layout, op_id);
             break;
         default:
             fprintf(stderr, "lower: op %zu has OpKind %d, which is out of scope for Phase A (ML path only)\n",
