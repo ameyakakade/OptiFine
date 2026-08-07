@@ -2,10 +2,23 @@
 
 Status: draft. Phase A (naive baseline), milestone 5 (real candidate
 diversity + next-use register allocation), and Phase B (compiler-emitted
-sleep scheduling) are done and produce the real numbers below, from the
-actual compiler running the actual `tiny_classifier.onnx` model through
-real Avrora. Milestone 6 (broader end-to-end comparison, DSP path) is not
-yet started. `documents/PHASE_B_NOTES.md` has the exploratory spike
+sleep scheduling) are done and produce the simulated numbers below, from
+the actual compiler running the actual `tiny_classifier.onnx` model
+through real Avrora.
+
+**Milestone 6 (the DSP path) is in progress and its lowering is
+incomplete**: the 64-point Q15 pipeline's IR is fully built, and 4 of its
+13 graph ops lower to AVR (`Input`, `Const`, `Window`, `Output`), but
+`BitReverse`, the six `FftButterfly` stages, `Magnitude` and
+`PeakExtract` are not yet lowered. The DSP pipeline therefore does not
+compile end-to-end, has never been run through Avrora, and **no DSP
+cycle, energy or flash figure is reported anywhere in this document**.
+Every result below is from the ML workload.
+
+Every figure in this report is regenerated from raw Avrora output by
+`python3 sim/report_results.py`, not transcribed by hand.
+
+`documents/PHASE_B_NOTES.md` has the exploratory spike
 research trail that preceded Phase B's implementation (which sleep modes
 Avrora can and can't simulate, and why); `documents/PHASE_B_PLAN.md` has
 the implementation task breakdown; `documents/LITERATURE_SURVEY.md` has
