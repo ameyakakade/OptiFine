@@ -34,21 +34,35 @@ static const CategoryEntry kCategories[] = {
     {"ror", "SUB"},     /* 1-cycle bucket, arbitrary within-bucket choice */
 
     /* --- DSP counted-loop machinery (milestone 6) ---
-     * Pointer loads/stores are genuinely the same 2-cycle SRAM access
-     * LD_SRAM/ST_SRAM already name, just reached through X/Y/Z instead of a
-     * 16-bit absolute address, so they map to those categories on the
-     * operation's real nature rather than by bucket coincidence. `movw` is a
-     * register move; `dec` is a 1-cycle ALU op. ADIW/SBIW and BRNE are new
-     * 2-cycle classes with their own cost_table.toml entries. */
+     *
+     * All nine map onto categories that already exist rather than adding new
+     * ones, for a specific reason: `cost_table.toml` is a recorded input of
+     * the retained Phase B experiment (`sim/fixtures/phase_b/manifest.json`
+     * pins its SHA-256), so extending that file would invalidate the
+     * canonical result's provenance for opcodes the ML path never emits.
+     * Reusing categories costs nothing, because every entry is
+     * `cycles x one constant` (spec v2 section 12) and these are placed by
+     * cycle count.
+     *
+     * Pointer loads/stores are genuinely the 2-cycle SRAM access
+     * LD_SRAM/ST_SRAM name, reached through X/Y/Z instead of a 16-bit
+     * absolute address. `movw` is a register move and `dec` a 1-cycle ALU
+     * op, so both sit in their natural families. ADIW/SBIW are 16-bit adds,
+     * which is what COMPLEX_ADD already prices ("2x ADD", 2 cycles). BRNE's
+     * taken cost is also 2 cycles and lands in the same class -- placement
+     * by cycle count, not a claim that a branch resembles an addition; see
+     * this file's header on within-bucket choice being arbitrary. BRNE's
+     * not-taken cost is 1 cycle, and instrbuf_price corrects for the single
+     * fall-through per loop rather than leaving it overcounted. */
     {"ld",   "LD_SRAM"},
     {"ldd",  "LD_SRAM"},
     {"st",   "ST_SRAM"},
     {"std",  "ST_SRAM"},
     {"movw", "MOV"},
     {"dec",  "SUB"},
-    {"adiw", "PTR_ARITH"},
-    {"sbiw", "PTR_ARITH"},
-    {"brne", "BRANCH"},
+    {"adiw", "COMPLEX_ADD"},
+    {"sbiw", "COMPLEX_ADD"},
+    {"brne", "COMPLEX_ADD"},
 };
 
 const char *avr_cost_category(const char *avr_mnemonic) {
