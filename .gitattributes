@@ -6,3 +6,18 @@
 # one file type where the wrong ending is a functional bug, not a style
 # issue.
 *.sh text eol=lf
+
+# Recorded inputs of the canonical Phase B experiment. The manifest at
+# sim/fixtures/phase_b/manifest.json pins each of these by SHA-256, and those
+# hashes were taken on Windows, so they are hashes of the CRLF byte sequence.
+# git stores them LF (core.autocrlf=input), which means a Linux or macOS
+# checkout would otherwise materialise a different byte sequence and fail the
+# provenance check on a file nobody had touched -- pinning the canonical
+# result to the machine that produced it. Forcing the checkout ending
+# reproduces the recorded bytes everywhere, which is what the manifest is
+# actually asserting. Found during the milestone-6 hardening pass; the
+# alternative, rewriting the manifest to LF hashes, would have destroyed the
+# provenance rather than preserved it.
+cost_table.toml text eol=crlf
+models/tiny_classifier_golden_input.txt text eol=crlf
+models/tiny_classifier_golden_output.txt text eol=crlf
