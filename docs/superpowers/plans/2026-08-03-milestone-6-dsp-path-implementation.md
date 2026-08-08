@@ -1159,6 +1159,135 @@ GIT_AUTHOR_DATE="2026-08-07T09:45:00+05:30" GIT_COMMITTER_DATE="2026-08-07T09:45
 
 ---
 
+## Amendment (2026-08-08): Tasks 6-10 are re-planned around counted loops
+
+A batch pre-flight of Tasks 6-10, run before any of them was dispatched,
+found two blockers. Both are recorded here rather than left to surface
+during implementation.
+
+### Blocker 1: fully unrolled lowering does not fit ATmega128 flash
+
+Straight-line lowering of the tasks as originally written needs **497,324
+bytes against the ATmega128's 131,072**. Measured, not estimated: the byte
+model was calibrated against the real toolchain by emitting the existing
+`OP_WINDOW` op, assembling it with `avr-gcc`, and confirming `avr-size`
+reports 4,608 bytes against 4,608 predicted.
+
+| op (as originally planned) | emitted | bytes | % of 128 KB |
+|---|---:|---:|---:|
+| BitReverse | 512 | 1,792 | 1.4% |
+| FftButterfly x6 | 38,400 | 107,520 | 82.0% |
+| Magnitude | 52,228 | 175,628 | **134.0%** |
+| PeakExtract | 60,768 | 206,144 | **157.3%** |
+| **total with existing ops** | **154,372** | **497,324** | **379.4%** |
+
+Magnitude and PeakExtract each exceed the whole device on their own. The
+spec's own budget line ("roughly 90KB ... fits with real margin") counted
+the 960 multiplies (69 KB) and treated everything else as overhead; that
+overhead is 428 KB, 19x what was budgeted. It is not a bad estimate of the
+multiplies -- it is that `lower_masked_select16` costs 84 bytes and the
+plan invokes it 8 times per isqrt element and 3 times per PeakExtract
+element-pass.
+
+**Resolution: counted loops, not unrolling.** `DSP_FFT_SIZE` stays 64, and
+neither Magnitude nor PeakExtract is dropped. The backend gained exactly
+the machinery statically bounded DSP control flow needs, and no more (see
+`instrbuf_loop_begin`/`instrbuf_loop_end` in `codegen/instr_buf.h`):
+
+- a `.L` label pseudo-instruction, free in both cycles and flash;
+- `dec` + `brne` for counted iteration;
+- X/Y/Z pointer addressing: `ld`/`st` with post-increment, `ldd`/`std`
+  with displacement, `adiw`/`sbiw`, `movw`;
+- loop *regions* in `InstrBuf`, so `instrbuf_price` reports what
+  **executes** while `num_instructions` stays what is **emitted**.
+
+Deliberately not added: general branching, computed jumps, a CFG, or any
+IR change. Trip counts are compile-time constants and every loop is
+counted, single-entry and single-exit. `rcall`/`ret` were considered and
+not added: loops alone bring the program to 5.3% of flash, so subroutines
+would buy nothing for their cost. The ML path is untouched.
+
+Projected with loops, same calibrated model:
+
+| op | emitted | bytes |
+|---|---:|---:|
+| Window | 39 | 78 |
+| BitReverse | 17 | 34 |
+| FftButterfly (6 stage loops + twiddle table) | 1,254 | 3,276 |
+| Magnitude | 825 | 1,650 |
+| PeakExtract (nested loops) | 139 | 278 |
+| Input/Const/Output (unchanged) | 544 | 1,632 |
+| **total** | **2,818** | **6,948** |
+
+**5.3% of flash, 124,124 bytes spare -- a 72x reduction.** The cost is
+cycles: 252,096 -> 261,216, **+3.6%**, because each iteration adds ~3
+cycles of `dec`/`brne`/pointer advance against a 296-cycle butterfly body.
+That trade is why loops were chosen over shrinking the workload.
+
+### Blocker 2: `lower_magnitude` is wrong by a factor of sqrt(32768)
+
+`lower_magnitude` as originally written squares via `lower_fixed_mul_q15`,
+which returns a **Q15** product (`value^2 * 32768`), then feeds it to
+`lower_isqrt16`, an **integer** square root. The result is the true
+magnitude divided by `sqrt(32768) = 181.02`.
+
+Simulated against Task 12's own golden reference, the top-8 peaks come out
+as 14, 9 and 6 against expected values of 2618.78, 1746.42 and 1138.96 --
+worst difference **2604.8** against Task 12's `assert(diff < 500)`. Beyond
+the scale error, the magnitudes collapse to single digits, destroying
+roughly 11 of 15 bits.
+
+**Resolution: replace the square-and-isqrt with the alpha-max-plus-beta-min
+approximation**, `mag ~= max(|re|,|im|) + min(|re|,|im|)/4`, which stays
+entirely in Q15, needs no square root and no multiply, and was measured
+against the same golden reference:
+
+| variant | worst top-8 diff | Task 12 gate (<500) |
+|---|---:|---|
+| exact `isqrt32(re^2 + im^2)` (32-bit) | 3.0 | pass |
+| **alpha-max-plus-beta-min, min/4** | **11.5** | **pass** |
+| max + min/2 | 25.5 | pass |
+| 7/8*max + 1/2*min | 326.8 | marginal |
+
+11.5 against a 500 tolerance is a 43x margin. Task 8 therefore drops
+`lower_isqrt16` and its nine scratch cells, and gains a branch-free
+`lower_abs16` built from the `lower_ge_mask16`/`lower_masked_select16`
+pair it already defines.
+
+### Consequences for each task
+
+- **Task 6 (BitReverse).** The permutation index differs per element, so
+  the loop cannot simply walk a pointer. Bake the 64 source offsets as a
+  flash table and loop over it, or keep this one unrolled: at 1,792 bytes
+  unrolled it is affordable either way. Lowest-risk option is to leave it
+  unrolled and note the reason.
+- **Task 7 (FftButterfly).** One loop per stage (6 loops, 32 iterations
+  each). Twiddles differ per butterfly, so bake them as a flash table
+  walked by a pointer alongside the data. The halve-before-combining fix
+  from `f182f10` still applies unchanged.
+- **Task 8 (Magnitude).** Rewritten per Blocker 2, plus a single 64-trip
+  loop. `DSP_SCRATCH_ZERO16` must still be written once before the loop:
+  Task 9 reads it and never writes it.
+- **Task 9 (PeakExtract).** Nested loops -- outer over the 8 passes, inner
+  over the 64 candidates -- with the compile-time index constant replaced
+  by a counter the loop maintains.
+- **Task 10 (`--dsp`).** Unaffected.
+
+### Scratch map
+
+Unchanged in extent: Task 7 uses offsets 0-15, Task 8 18-41 (now with
+spare cells freed by dropping isqrt), Task 9 42-179. `DSP_SCRATCH_BYTES`
+stays 180, and SRAM stays 2,516 of 4,096 bytes.
+
+### What the pre-flight confirmed was already sound
+
+All 17 opcodes the original tasks needed were already present in both
+`avr_interp.c` and `cost_category.c`; every op's SRAM region already
+matches its dtype (`COMPLEX_Q15` 4 bytes, `FIXED_Q15` 2), so the
+elements-versus-bytes hazard that bit `lower_output` does not recur here.
+
+---
+
 ## Task 6: `OP_BIT_REVERSE`
 
 **Files:**
