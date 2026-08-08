@@ -28,6 +28,19 @@ typedef struct {
      * test. Generous: the whole 64-point DSP pipeline executes ~250k
      * instructions, and a runaway loop hits this rather than hanging CI. */
     unsigned long budget;
+
+    /* Program-memory image, read by `lpm` through Z.
+     *
+     * Built from the candidate before execution by laying every instruction
+     * out at its real flash byte address, exactly as the assembler would: two
+     * bytes for an ordinary opcode, four for lds/sts and the other 32-bit
+     * encodings, two for a `.dw` data word (little-endian), zero for a label.
+     * Addresses therefore match the linked AVR image, so a `lo8/hi8(label)`
+     * the compiler emitted resolves here to the same byte the real device
+     * would read. Only `.dw` payload bytes are meaningful; opcode bytes are
+     * left zero because nothing in this project reads its own code. */
+    uint8_t progmem[AVR_INTERP_MEM_SIZE];
+    size_t progmem_size;
 } AvrInterp;
 
 #define AVR_INTERP_DEFAULT_BUDGET 20000000UL

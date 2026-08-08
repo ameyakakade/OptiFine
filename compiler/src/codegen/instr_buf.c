@@ -50,6 +50,28 @@ int avr_instr_is_label(const AvrInstr *instr) {
     return strcmp(instr->mnemonic, AVR_LABEL_MNEMONIC) == 0;
 }
 
+int avr_instr_is_data_word(const AvrInstr *instr) {
+    return strcmp(instr->mnemonic, AVR_DATA_WORD_MNEMONIC) == 0;
+}
+
+void ins_data_word(InstrBuf *b, uint16_t value) {
+    char w[AVR_OPERAND_LEN];
+    snprintf(w, AVR_OPERAND_LEN, "0x%04X", value);
+    ins1(b, AVR_DATA_WORD_MNEMONIC, w);
+}
+
+/* snprintf truncates silently, and a truncated address operand assembles to a
+ * wrong-but-plausible address rather than failing -- exactly how the first
+ * version of this read twiddle k=0 correctly and every other entry from the
+ * wrong offset. Truncation is a codegen bug, so it aborts here. */
+static void fmt_sym(char *out, const char *half, const char *symbol, int offset) {
+    int n = offset ? snprintf(out, AVR_OPERAND_LEN, "%s(%s+%d)", half, symbol, offset)
+                   : snprintf(out, AVR_OPERAND_LEN, "%s(%s)", half, symbol);
+    assert(n > 0 && n < AVR_OPERAND_LEN);
+}
+void fmt_lo8_sym(char *out, const char *symbol, int offset) { fmt_sym(out, "lo8", symbol, offset); }
+void fmt_hi8_sym(char *out, const char *symbol, int offset) { fmt_sym(out, "hi8", symbol, offset); }
+
 void fmt_reg(char *out, int r) {
     snprintf(out, AVR_OPERAND_LEN, "r%d", r);
 }
@@ -116,7 +138,16 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
         /* A label is an assembler directive, not an instruction: it occupies
          * no flash and consumes no cycles, so it is skipped here rather than
          * given a zero-energy cost_table.toml entry it would not deserve. */
-        if (avr_instr_is_label(&buf->items[i])) {
+        if (avr_instr_is_label(&buf->items[i]) || avr_instr_is_data_word(&buf->items[i])) {
+            continue; /* directives: flash for .dw, nothing for .L; no cycles either way */
+        }
+        uint32_t direct = 1;
+        for (size_t l = 0; l < buf->num_loops; l++) {
+            if (i >= buf->loops[l].first && i <= buf->loops[l].last) direct *= buf->loops[l].trip;
+        }
+        int direct_cycles = avr_direct_cycles(buf->items[i].mnemonic);
+        if (direct_cycles) {
+            energy_nj += AVR_CYCLE_ENERGY_NJ * (double)direct_cycles * (double)direct;
             continue;
         }
         const char *category = avr_cost_category(buf->items[i].mnemonic);

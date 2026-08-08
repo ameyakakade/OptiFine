@@ -82,6 +82,32 @@ void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx);
 int avr_instr_is_label(const AvrInstr *instr);
 #define AVR_LABEL_MNEMONIC ".L"
 
+/* --- Program-memory constant data ---
+ *
+ * `.dw` emits one 16-bit word of constant data into the instruction stream.
+ * It occupies two bytes of flash and costs no cycles, and exists so the DSP
+ * path can bake its canonical twiddle table into program memory and read it
+ * with `lpm` instead of materialising each constant with ldi/sts.
+ *
+ * Placement is the caller's responsibility and it matters: raw data sitting in
+ * .text disassembles as instructions, so a table must go where control flow
+ * cannot reach it -- after the program's terminating `break`. A dedicated
+ * `.progmem` section is NOT an option here: under this project's
+ * `-nostartfiles` link no `.progmem*` output section exists, so such a section
+ * is silently dropped and its label resolves to 0x0000, which would make `lpm`
+ * read instruction bytes as data. Verified empirically, not assumed. */
+int avr_instr_is_data_word(const AvrInstr *instr);
+#define AVR_DATA_WORD_MNEMONIC ".dw"
+void ins_data_word(InstrBuf *b, uint16_t value);
+
+/* `lo8(sym+off)` / `hi8(sym+off)`: the low and high byte of a label's BYTE
+ * address, which is what Z must hold for `lpm`. Deliberately not pm_lo8/
+ * pm_hi8, which yield the WORD address and would read the wrong half of the
+ * table -- confirmed against avr-as, where a label at byte 0x1E gives
+ * lo8=0x1E but pm_lo8=0x0F. */
+void fmt_lo8_sym(char *out, const char *symbol, int offset);
+void fmt_hi8_sym(char *out, const char *symbol, int offset);
+
 /* Converts a finished InstrBuf into a priced Candidate, taking ownership of
  * buf->items. Returns 0 on success, -1 (with an error printed) if any
  * instruction has no cost-category mapping or no cost_table.toml entry.

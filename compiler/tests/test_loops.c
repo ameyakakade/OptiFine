@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/instr_buf.h"
@@ -201,6 +202,122 @@ static void test_label_is_free_and_every_new_opcode_is_priced(void) {
     candidate_free(&c);
 }
 
+/* --- Program-memory (lpm) microfixture ---
+ *
+ * The DSP path bakes its canonical 32-entry twiddle table into flash and reads
+ * it with lpm. Three things have to hold and none may be assumed: lo8/hi8 must
+ * give the BYTE address lpm wants (pm_lo8/pm_hi8 give the word address and
+ * would read the wrong half), the four bytes per entry must reconstruct
+ * little-endian into two int16s, and the table must sit where control flow
+ * cannot execute it. */
+
+#define TW_ENTRIES 32
+#define TW_LABEL ".Ltw"
+
+static void twiddle_q15(int k, int16_t *wr, int16_t *wi) {
+    double a = -2.0 * 3.14159265358979323846 * (double)k / 64.0;
+    long r = lround(cos(a) * 32767.0), i = lround(sin(a) * 32767.0);
+    *wr = (int16_t)(r > 32767 ? 32767 : (r < -32768 ? -32768 : r));
+    *wi = (int16_t)(i > 32767 ? 32767 : (i < -32768 ? -32768 : i));
+}
+
+/* Emits: load entry k into r16..r19, halt, then the table. */
+static void build_twiddle_probe(InstrBuf *b, int k) {
+    char zl[AVR_OPERAND_LEN], zh[AVR_OPERAND_LEN], zp[AVR_OPERAND_LEN], reg[AVR_OPERAND_LEN];
+    char sym[AVR_OPERAND_LEN];
+    fmt_reg(zl, 30); fmt_reg(zh, 31); fmt_ptr(zp, 'Z', 1);
+    fmt_lo8_sym(sym, TW_LABEL, k * 4); ins2(b, "ldi", zl, sym);
+    fmt_hi8_sym(sym, TW_LABEL, k * 4); ins2(b, "ldi", zh, sym);
+    for (int i = 0; i < 4; i++) { fmt_reg(reg, 16 + i); ins2(b, "lpm", reg, zp); }
+    /* store them so the test can read them back out of SRAM */
+    for (int i = 0; i < 4; i++) {
+        char a[AVR_OPERAND_LEN]; fmt_addr(a, (uint16_t)(0x0300 + i));
+        fmt_reg(reg, 16 + i); ins2(b, "sts", a, reg);
+    }
+    ins0(b, "break");
+    /* table AFTER break: unreachable by fall-through */
+    ins1(b, AVR_LABEL_MNEMONIC, TW_LABEL);
+    for (int e = 0; e < TW_ENTRIES; e++) {
+        int16_t wr, wi; twiddle_q15(e, &wr, &wi);
+        ins_data_word(b, (uint16_t)wr);
+        ins_data_word(b, (uint16_t)wi);
+    }
+}
+
+static void test_lpm_reads_canonical_twiddles(void) {
+    CostModel cm; load_costs(&cm);
+    const int probes[] = {0, 1, 16, 31};
+    for (size_t t = 0; t < sizeof(probes) / sizeof(probes[0]); t++) {
+        int k = probes[t];
+        InstrBuf b; instrbuf_init(&b);
+        build_twiddle_probe(&b, k);
+        Candidate c; assert(instrbuf_price(&b, &cm, &c) == 0);
+        AvrInterp in; avr_interp_init(&in);
+        assert(avr_interp_run(&in, &c) == 0);
+
+        int16_t wr_exp, wi_exp; twiddle_q15(k, &wr_exp, &wi_exp);
+        int16_t wr = (int16_t)((uint16_t)in.mem[0x0300] | ((uint16_t)in.mem[0x0301] << 8));
+        int16_t wi = (int16_t)((uint16_t)in.mem[0x0302] | ((uint16_t)in.mem[0x0303] << 8));
+        printf("  lpm k=%2d -> wr=%6d wi=%6d (expect %6d %6d)\n", k, wr, wi, wr_exp, wi_exp);
+        assert(wr == wr_exp);
+        assert(wi == wi_exp);
+        candidate_free(&c);
+    }
+}
+
+static void test_twiddle_table_is_below_the_lpm_64k_boundary(void) {
+    CostModel cm; load_costs(&cm);
+    InstrBuf b; instrbuf_init(&b);
+    build_twiddle_probe(&b, 0);
+    Candidate c; assert(instrbuf_price(&b, &cm, &c) == 0);
+    /* Recompute the table's flash byte address the same way the image is laid
+     * out. Without ELPM/RAMPZ, Z can only reach below 0x10000, so this is a
+     * hard precondition of the whole approach, not a nicety. */
+    size_t addr = 0, table = (size_t)-1;
+    for (size_t i = 0; i < c.num_instructions; i++) {
+        const AvrInstr *ins = &c.instructions[i];
+        if (avr_instr_is_label(ins) && strcmp(ins->operands[0], TW_LABEL) == 0) { table = addr; break; }
+        if (avr_instr_is_data_word(ins)) addr += 2;
+        else if (strcmp(ins->mnemonic, "lds") == 0 || strcmp(ins->mnemonic, "sts") == 0) addr += 4;
+        else if (!avr_instr_is_label(ins)) addr += 2;
+    }
+    printf("  twiddle table at flash byte 0x%04X (limit 0x10000)\n", (unsigned)table);
+    assert(table != (size_t)-1);
+    assert(table < 0x10000u);
+    candidate_free(&c);
+}
+
+static void test_table_cannot_be_reached_by_fall_through(void) {
+    CostModel cm; load_costs(&cm);
+    InstrBuf b; instrbuf_init(&b);
+    build_twiddle_probe(&b, 0);
+    Candidate c; assert(instrbuf_price(&b, &cm, &c) == 0);
+    /* Two structural guarantees, checked rather than argued: the table label
+     * comes after the halting `break`, and no branch anywhere targets it. */
+    size_t brk = (size_t)-1, label = (size_t)-1;
+    for (size_t i = 0; i < c.num_instructions; i++) {
+        const AvrInstr *ins = &c.instructions[i];
+        if (strcmp(ins->mnemonic, "break") == 0 && brk == (size_t)-1) brk = i;
+        if (avr_instr_is_label(ins) && strcmp(ins->operands[0], TW_LABEL) == 0) label = i;
+        if (strcmp(ins->mnemonic, "brne") == 0) assert(strcmp(ins->operands[0], TW_LABEL) != 0);
+    }
+    assert(brk != (size_t)-1 && label != (size_t)-1 && label > brk);
+    /* And the interpreter refuses to execute a data word if it ever happened. */
+    candidate_free(&c);
+}
+
+static void test_lpm_is_priced_at_three_cycles(void) {
+    CostModel cm; load_costs(&cm);
+    InstrBuf b; instrbuf_init(&b);
+    char zp[AVR_OPERAND_LEN], reg[AVR_OPERAND_LEN];
+    fmt_ptr(zp, 'Z', 1); fmt_reg(reg, 16);
+    ins2(&b, "lpm", reg, zp);
+    Candidate c; assert(instrbuf_price(&b, &cm, &c) == 0);
+    /* Confirmed against Avrora's own trace: lpmpi runs cycle 2 -> 5. */
+    assert(c.cycles == 3);
+    candidate_free(&c);
+}
+
 int main(void) {
     test_loop_executes_body_trip_times();
     test_loop_emits_far_less_than_unrolling();
@@ -209,6 +326,10 @@ int main(void) {
     test_pointer_post_increment_walks_an_array();
     test_displacement_addressing_reads_within_an_element();
     test_label_is_free_and_every_new_opcode_is_priced();
+    test_lpm_reads_canonical_twiddles();
+    test_twiddle_table_is_below_the_lpm_64k_boundary();
+    test_table_cannot_be_reached_by_fall_through();
+    test_lpm_is_priced_at_three_cycles();
     printf("test_loops: all tests passed\n");
     return 0;
 }

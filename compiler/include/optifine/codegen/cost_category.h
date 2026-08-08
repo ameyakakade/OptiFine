@@ -16,4 +16,10 @@
  * must treat NULL as fatal -- never default to a silent zero cost. */
 const char *avr_cost_category(const char *avr_mnemonic);
 
+/* Cycle count for opcodes no cost-table category can express (currently only
+ * `lpm`, at 3 cycles). Returns 0 when the opcode is not one of them, in which
+ * case avr_cost_category applies. See cost_category.c for why these are not
+ * given their own cost_table.toml entries. */
+int avr_direct_cycles(const char *avr_mnemonic);
+
 #endif /* OPTIFINE_CODEGEN_COST_CATEGORY_H */

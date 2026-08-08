@@ -24,6 +24,10 @@ int emit_candidate(const Candidate *candidate, FILE *out) {
             fprintf(out, "%s:\n", instr->operands[0]);
             continue;
         }
+        if (avr_instr_is_data_word(instr)) {
+            fprintf(out, "    .word %s\n", instr->operands[0]);
+            continue;
+        }
         fprintf(out, "    %s", instr->mnemonic);
         for (int j = 0; j < instr->num_operands; j++) {
             fprintf(out, "%s%s", j == 0 ? " " : ", ", instr->operands[j]);

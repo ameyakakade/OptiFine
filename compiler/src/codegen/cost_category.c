@@ -63,7 +63,45 @@ static const CategoryEntry kCategories[] = {
     {"adiw", "COMPLEX_ADD"},
     {"sbiw", "COMPLEX_ADD"},
     {"brne", "COMPLEX_ADD"},
+
+    /* Comparisons, logical shift and exclusive-or: all 1-cycle ALU ops, placed
+     * in 1-cycle families. `lsr` is deliberately separate from `asr`: the
+     * 32-bit isqrt operates on unsigned values, where an arithmetic shift
+     * would smear the sign bit. */
+    {"cp",   "SUB"},
+    {"cpc",  "SUB"},
+    {"lsr",  "SUB"},
+    {"eor",  "ADD"},
 };
+
+/* Opcodes whose cycle count no cost_table.toml category expresses.
+ *
+ * `lpm` takes 3 cycles and every category in the table is 1 or 2, so there is
+ * nothing honest to map it onto. Rather than add an entry -- cost_table.toml
+ * is a recorded input of the retained Phase B experiment and changing it would
+ * invalidate that provenance for an opcode the ML path never emits -- these
+ * are priced directly as `cycles x the per-cycle constant`, which is precisely
+ * what every category in the table already reduces to (spec v2 section 12).
+ * The indirection through a category name is a lookup convenience, not part of
+ * the energy model. */
+static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
+    {"lpm", 3},
+    /* BREAK halts the simulator and costs 1 cycle. This is the "+1 fixed
+     * harness overhead" the Phase A write-up already accounts for by hand
+     * (sim/fixtures/bringup_smoke.avrora.txt: 7 instruction cycles, 8
+     * reported); pricing it makes that constant explicit instead of magic. */
+    {"break", 1},
+};
+
+int avr_direct_cycles(const char *avr_mnemonic) {
+    if (!avr_mnemonic) return 0;
+    for (size_t i = 0; i < sizeof(kDirectCycles) / sizeof(kDirectCycles[0]); i++) {
+        if (strcmp(kDirectCycles[i].mnemonic, avr_mnemonic) == 0) {
+            return kDirectCycles[i].cycles;
+        }
+    }
+    return 0;
+}
 
 const char *avr_cost_category(const char *avr_mnemonic) {
     if (!avr_mnemonic) {

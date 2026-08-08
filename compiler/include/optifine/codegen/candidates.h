@@ -25,7 +25,12 @@
  * mapping from opcode to cost-table category. Longest current opcode is
  * "mulsu" (5 chars). */
 #define AVR_MNEMONIC_LEN 16
-#define AVR_OPERAND_LEN 16
+/* Widened from 16 for the DSP path's symbolic program-memory operands:
+ * "lo8(.Ltw+124)" does not fit 16 bytes, and snprintf truncates silently,
+ * which produced a wrong-but-plausible address rather than an error. The
+ * formatters now detect truncation outright; this keeps ordinary operands
+ * comfortably inside the buffer. */
+#define AVR_OPERAND_LEN 24
 
 typedef struct {
     char mnemonic[AVR_MNEMONIC_LEN];
