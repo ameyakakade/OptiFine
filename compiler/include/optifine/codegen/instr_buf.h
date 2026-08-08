@@ -10,11 +10,33 @@
 #include "optifine/codegen/candidates.h"
 #include "optifine/cost_model.h"
 
+/* A statically bounded counted loop: instructions [first,last] execute
+ * `trip` times. Regions may nest; a nested region's instructions execute
+ * the product of the enclosing trip counts. */
+typedef struct {
+    size_t first;
+    size_t last;
+    uint32_t trip;
+} LoopRegion;
+
+#define INSTRBUF_MAX_LOOPS 32
+
 typedef struct {
     AvrInstr *items;
     size_t count;
     size_t capacity;
+    LoopRegion loops[INSTRBUF_MAX_LOOPS];
+    size_t num_loops;
 } InstrBuf;
+
+/* Open counted-loop handle. Opaque to callers apart from being storage. */
+typedef struct {
+    size_t body_first;   /* index of the first body instruction */
+    size_t region;       /* slot reserved in InstrBuf::loops */
+    uint32_t trip;
+    int counter_reg;
+    char label[AVR_OPERAND_LEN];
+} LoopCtx;
 
 void instrbuf_init(InstrBuf *b);
 void instrbuf_push(InstrBuf *b, const char *mnemonic, int num_operands,
@@ -22,9 +44,43 @@ void instrbuf_push(InstrBuf *b, const char *mnemonic, int num_operands,
 void ins1(InstrBuf *b, const char *m, const char *o1);
 void ins2(InstrBuf *b, const char *m, const char *o1, const char *o2);
 
+void ins0(InstrBuf *b, const char *m);
+
 void fmt_reg(char *out, int r);
 void fmt_addr(char *out, uint16_t addr);
 void fmt_imm(char *out, uint8_t v);
+/* Pointer operands: "X+", "Z+", "Z+6" and the like, plus lo8()/hi8() of a
+ * 16-bit address for loading a pointer pair with ldi. */
+void fmt_ptr(char *out, char reg, int post_increment);
+void fmt_ptr_disp(char *out, char reg, int displacement);
+void fmt_lo8(char *out, uint16_t addr);
+void fmt_hi8(char *out, uint16_t addr);
+
+/* --- Statically bounded counted loops ---
+ *
+ * The DSP path cannot be lowered as straight-line code: fully unrolling the
+ * 64-point pipeline needs ~497 KB against the ATmega128's 128 KB of flash
+ * (measured, not estimated -- see the milestone 6 pre-flight). These emit a
+ * counted loop instead, so the body is emitted once and executed `trip`
+ * times.
+ *
+ * `instrbuf_loop_begin` emits `ldi <counter>, trip` and a label;
+ * `instrbuf_loop_end` emits `dec <counter>` and `brne <label>`, and records
+ * the body as a loop region so pricing reflects what actually *executes*
+ * rather than what is emitted. `Candidate::num_instructions` stays the
+ * emitted count (that is what occupies flash) while `cycles`/`energy_nj`
+ * become the executed totals.
+ *
+ * Deliberately not a general control-flow facility: trip counts are
+ * compile-time constants, loops are counted and single-entry/single-exit,
+ * and there is no branching of any other kind. */
+void instrbuf_loop_begin(InstrBuf *b, LoopCtx *ctx, uint32_t trip, int counter_reg);
+void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx);
+
+/* True for the label pseudo-instruction, which emits `name:` rather than an
+ * opcode and costs nothing. */
+int avr_instr_is_label(const AvrInstr *instr);
+#define AVR_LABEL_MNEMONIC ".L"
 
 /* Converts a finished InstrBuf into a priced Candidate, taking ownership of
  * buf->items. Returns 0 on success, -1 (with an error printed) if any

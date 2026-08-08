@@ -30,3 +30,16 @@ LD_SRAM       = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATme
 ST_SRAM       = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (STS) -- see SOURCES.md" }
 FIXED_MUL_Q15 = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (FMULS) -- DSP path, see SOURCES.md" }
 COMPLEX_ADD   = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (2x ADD: re+re, im+im) -- DSP path, see SOURCES.md" }
+
+# Control-flow and pointer-addressing categories, added for the DSP path's
+# counted loops (milestone 6). Same methodology as every entry above: the
+# cycle count comes from the AVR Instruction Set Manual and is multiplied by
+# the single Avrora-calibrated per-cycle constant. No new energy claim is
+# made -- these are cycle classes, not per-opcode current measurements.
+#
+# BRANCH is priced at BRNE's *taken* cost (2 cycles). A counted loop takes
+# the branch trip-1 times and falls through once at 1 cycle, so pricing at
+# the taken cost overcounts by exactly 1 cycle per loop; instrbuf_price
+# subtracts that back per loop region rather than leaving it approximate.
+PTR_ARITH     = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (ADIW/SBIW) -- DSP path, see SOURCES.md" }
+BRANCH        = { energy_nj = 5.675, source = "Avrora Beta 1.7.115 built-in ATmega128 power model (3.0V, 7.5667mA active) x 2 cycles (BRNE taken; not-taken is 1, corrected per loop by instrbuf_price) -- DSP path, see SOURCES.md" }

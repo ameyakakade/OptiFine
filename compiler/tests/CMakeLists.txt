@@ -24,10 +24,16 @@ add_test(NAME test_dsp_build COMMAND test_dsp_build)
 add_executable(test_avr_interp_opcodes test_avr_interp_opcodes.c
     avr_interp.c
     ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
+    ${CMAKE_SOURCE_DIR}/src/cost_model.c
 )
 target_include_directories(test_avr_interp_opcodes PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     target_compile_definitions(test_avr_interp_opcodes PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    # instr_buf.c uses llround when pricing; see the libm note on the other targets.
+    target_link_libraries(test_avr_interp_opcodes PRIVATE m)
 endif()
 add_test(NAME test_avr_interp_opcodes COMMAND test_avr_interp_opcodes)
 
@@ -134,3 +140,25 @@ add_test(NAME test_periodic COMMAND test_periodic
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier.onnx
     ${CMAKE_SOURCE_DIR}/../cost_table.toml
     ${CMAKE_SOURCE_DIR}/../models/tiny_classifier_golden_input.txt)
+
+add_executable(test_loops test_loops.c
+    avr_interp.c
+    ${CMAKE_SOURCE_DIR}/src/cost_model.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
+    ${CMAKE_SOURCE_DIR}/src/ir.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/dsp_build.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
+)
+target_include_directories(test_loops PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_loops PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    target_link_libraries(test_loops PRIVATE m)
+endif()
+add_test(NAME test_loops COMMAND test_loops
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)

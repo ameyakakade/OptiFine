@@ -32,6 +32,23 @@ static const CategoryEntry kCategories[] = {
     {"and", "ADD"},     /* 1-cycle bucket, arbitrary within-bucket choice */
     {"asr", "SUB"},     /* 1-cycle bucket, arbitrary within-bucket choice */
     {"ror", "SUB"},     /* 1-cycle bucket, arbitrary within-bucket choice */
+
+    /* --- DSP counted-loop machinery (milestone 6) ---
+     * Pointer loads/stores are genuinely the same 2-cycle SRAM access
+     * LD_SRAM/ST_SRAM already name, just reached through X/Y/Z instead of a
+     * 16-bit absolute address, so they map to those categories on the
+     * operation's real nature rather than by bucket coincidence. `movw` is a
+     * register move; `dec` is a 1-cycle ALU op. ADIW/SBIW and BRNE are new
+     * 2-cycle classes with their own cost_table.toml entries. */
+    {"ld",   "LD_SRAM"},
+    {"ldd",  "LD_SRAM"},
+    {"st",   "ST_SRAM"},
+    {"std",  "ST_SRAM"},
+    {"movw", "MOV"},
+    {"dec",  "SUB"},
+    {"adiw", "PTR_ARITH"},
+    {"sbiw", "PTR_ARITH"},
+    {"brne", "BRANCH"},
 };
 
 const char *avr_cost_category(const char *avr_mnemonic) {
