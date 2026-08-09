@@ -162,3 +162,25 @@ if(UNIX)
 endif()
 add_test(NAME test_loops COMMAND test_loops
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)
+
+add_executable(test_dsp32 test_dsp32.c
+    avr_interp.c
+    ${CMAKE_SOURCE_DIR}/src/cost_model.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/dsp32.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
+    ${CMAKE_SOURCE_DIR}/src/ir.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/dsp_build.c
+)
+target_include_directories(test_dsp32 PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_dsp32 PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    target_link_libraries(test_dsp32 PRIVATE m)
+endif()
+add_test(NAME test_dsp32 COMMAND test_dsp32 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)

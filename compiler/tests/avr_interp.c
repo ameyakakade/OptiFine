@@ -217,6 +217,7 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         uint16_t product = (uint16_t)(r[reg_of(instr->operands[0])] * r[reg_of(instr->operands[1])]);
         r[0] = (uint8_t)(product & 0xFF);
         r[1] = (uint8_t)(product >> 8);
+        interp->carry = (product >> 15) & 1; /* real AVR: C = bit 15 of the result */
         return 0;
     }
     if (strcmp(m, "muls") == 0) { /* signed x signed -> r1:r0 */
@@ -225,6 +226,7 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         uint16_t bits = (uint16_t)(int16_t)((int)a * (int)b);
         r[0] = (uint8_t)(bits & 0xFF);
         r[1] = (uint8_t)(bits >> 8);
+        interp->carry = (bits >> 15) & 1;
         return 0;
     }
     if (strcmp(m, "mulsu") == 0) { /* signed x unsigned -> r1:r0 */
@@ -233,6 +235,7 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         uint16_t bits = (uint16_t)(int16_t)((int)a * (int)b);
         r[0] = (uint8_t)(bits & 0xFF);
         r[1] = (uint8_t)(bits >> 8);
+        interp->carry = (bits >> 15) & 1;
         return 0;
     }
 

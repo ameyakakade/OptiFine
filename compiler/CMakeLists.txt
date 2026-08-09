@@ -15,6 +15,7 @@ add_executable(optifine
     src/pb_reader.c
     src/ingest.c
     src/dsp_build.c
+    src/codegen/dsp32.c
     src/cost_model.c
     src/locality.c
     src/emit.c

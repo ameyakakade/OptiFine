@@ -59,4 +59,49 @@ extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
 #define REG_DSP_ACC_P3  22
 #define REG_DSP_SIGNEXT 23  /* sign-extension scratch, reused across partial products */
 
+/* --- DSP 32-bit register-resident primitive layer (codegen/dsp32.c) ---
+ *
+ * Magnitude needs exact `isqrt32(re^2 + im^2)`, and the only affordable way
+ * to run 16 isqrt iterations 64 times is to keep the working values in
+ * registers rather than round-tripping every one through SRAM. These three
+ * quads are that working set.
+ *
+ * Quads start on even registers because `movw` requires an even register
+ * pair; DSP32_A/B/C are therefore movw-addressable as two pairs each.
+ *
+ * THE CONTRACT, which FFT and Magnitude lowering must not violate:
+ *
+ *   r0, r1        hardwired mul destination. Clobbered by every mul/muls/
+ *                 mulsu. Never hold anything across a multiply.
+ *   r2            REG_ZERO, always zero, program-global. Read-only here.
+ *   r3            unused, reserved.
+ *   r4  - r7      DSP32_A. Caller-owned operand / accumulator.
+ *   r8  - r11     DSP32_B. Caller-owned operand.
+ *   r12 - r15     DSP32_C. Result / helper-owned temporary. A helper that
+ *                 declares it clobbers C may overwrite it freely.
+ *   r16 - r19     16-bit operand window (REG_DSP_OP_*). muls/mulsu require
+ *                 r16-r23, so the 16x16->32 multiply's inputs live here.
+ *   r20 - r23     multiply partial-product scratch (REG_DSP_ACC_P*,
+ *                 REG_DSP_SIGNEXT). Clobbered by dsp32_mul16x16.
+ *   r24, r25      REG_SCRATCH0/1, byte scratch.
+ *   r26 - r31     X, Y, Z pointers. Never used as data by this layer.
+ *
+ * Inputs, outputs and temporaries therefore never alias: a helper writes
+ * only its declared destination quad plus the scratch window its doc
+ * comment names. The one overlap that would matter -- the 16-bit multiply
+ * window (r16-r23) against the quads -- cannot occur, because r16-r23 lie
+ * entirely outside r4-r15.
+ *
+ * ML-path safety: none of r4-r15 is live during any ML op. r4-r8 fall
+ * inside Requantize's r3-r8 product buffer and r9-r15 inside the MatMul
+ * cache pool, but a --dsp build never lowers an ML op and vice versa
+ * (main.c rejects the combination), so the two windows are never live in
+ * the same program. This is the same non-concurrency argument the MatMul
+ * cache pool already rests on, applied across paths rather than within
+ * one. */
+#define DSP32_A 4
+#define DSP32_B 8
+#define DSP32_C 12
+#define DSP32_BYTES 4
+
 #endif /* OPTIFINE_CODEGEN_REGISTERS_H */
