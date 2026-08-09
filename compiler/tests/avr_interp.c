@@ -26,6 +26,7 @@ void avr_interp_init(AvrInterp *interp) {
     interp->budget = AVR_INTERP_DEFAULT_BUDGET;
     memset(interp->progmem, 0, sizeof(interp->progmem));
     interp->progmem_size = 0;
+    interp->cycles = 0;
 }
 
 /* X/Y/Z are register pairs r26:r27, r28:r29, r30:r31. */
@@ -67,6 +68,24 @@ static long label_flash_address(const Candidate *c, const char *name) {
         addr += instr_flash_bytes(ins);
     }
     return -1;
+}
+
+/* Cycle cost of one executed instruction on ATmega128, from the AVR
+ * Instruction Set Manual. Transcribed here deliberately rather than shared
+ * with the compiler's cost model, so the two can disagree and be caught.
+ * `taken` distinguishes BRNE's two costs. */
+static int avr_interp_cycles(const AvrInstr *ins, int taken) {
+    const char *m = ins->mnemonic;
+    if (avr_instr_is_label(ins) || avr_instr_is_data_word(ins)) return 0;
+    if (!strcmp(m, "brne")) return taken ? 2 : 1;
+    if (!strcmp(m, "lpm")) return 3;
+    if (!strcmp(m, "lds") || !strcmp(m, "sts")) return 2;
+    if (!strcmp(m, "ld") || !strcmp(m, "st") ||
+        !strcmp(m, "ldd") || !strcmp(m, "std")) return 2;
+    if (!strcmp(m, "mul") || !strcmp(m, "muls") || !strcmp(m, "mulsu")) return 2;
+    if (!strcmp(m, "adiw") || !strcmp(m, "sbiw")) return 2;
+    if (!strcmp(m, "break")) return 1;
+    return 1; /* every remaining single-word ALU/move opcode */
 }
 
 static int ptr_base(char name) {
@@ -398,14 +417,21 @@ int avr_interp_run(AvrInterp *interp, const Candidate *candidate) {
                 return -1;
             }
             interp->regs[reg_of(ins->operands[0])] = v;
+            interp->cycles += avr_interp_cycles(ins, 0);
             pc++;
             continue;
         }
         if (strcmp(ins->mnemonic, "break") == 0) {
+            interp->cycles += avr_interp_cycles(ins, 0);
             return 0; /* halts, exactly as Avrora does; anything after is data */
         }
         if (avr_interp_step(interp, ins) != 0) {
             return -1;
+        }
+        if (strcmp(ins->mnemonic, "brne") == 0) {
+            interp->cycles += avr_interp_cycles(ins, !interp->zero);
+        } else {
+            interp->cycles += avr_interp_cycles(ins, 0);
         }
         if (strcmp(ins->mnemonic, "brne") == 0 && !interp->zero) {
             long target = find_label(candidate, ins->operands[0]);

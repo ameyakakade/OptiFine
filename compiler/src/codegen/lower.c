@@ -512,6 +512,57 @@ static void lower_window(InstrBuf *buf, const IrGraph *graph, const SramLayout *
     }
 }
 
+/* ---- OP_BIT_REVERSE: fixed compile-time index permutation from the real
+ * Q15 window output into the complex Q15 working buffer ---- */
+
+/* Reverses the low `bits` bits of i. Six bits for N=64.
+ *
+ * The permutation is an involution: reversing a bit pattern twice restores
+ * it, so brev(brev(i)) == i. That is why writing `out[i] = in[brev(i)]` here
+ * and specifying it as `out[brev(i)] = in[i]` describe the same permutation --
+ * substituting j = brev(i) turns one into the other. The test checks both
+ * framings against an independent host oracle rather than relying on that
+ * argument. */
+static size_t dsp_bit_reverse_index(size_t i, int bits) {
+    size_t r = 0;
+    for (int b = 0; b < bits; b++) {
+        r = (r << 1) | (i & 1);
+        i >>= 1;
+    }
+    return r;
+}
+
+/* Deliberately unrolled, unlike the rest of the DSP path.
+ *
+ * Every other op loops because unrolling it costs kilobytes; this one is 64
+ * copies of six instructions, ~1.8 KB, about 1.4% of the ATmega128's flash.
+ * A loop would need the permutation as runtime data -- a 128-byte program-
+ * memory table plus lpm loads and pointer arithmetic per element -- to save
+ * roughly 1.6 KB out of a budget with over 120 KB spare. The complexity is
+ * not worth it, and an unrolled permutation has no control flow to get wrong.
+ *
+ * Reads FIXED_Q15 (2-byte stride), writes COMPLEX_Q15 (4-byte stride) with
+ * the imaginary half zeroed: this op is where the pipeline crosses from real
+ * samples to the complex buffer the butterfly stages operate on. */
+static void lower_bit_reverse(InstrBuf *buf, const IrGraph *graph, const SramLayout *layout, size_t op_id) {
+    const IrOp *op = &graph->ops[op_id];
+    size_t in_id = op->inputs[0];
+    size_t n = sram_layout_num_elements(op);
+    uint16_t in_addr = sram_layout_addr(layout, graph, in_id, 0);
+    uint16_t out_addr = sram_layout_addr(layout, graph, op_id, 0);
+    for (size_t i = 0; i < n; i++) {
+        size_t src = dsp_bit_reverse_index(i, DSP_FFT_LOG2);
+        lower_copy16(buf, (uint16_t)(in_addr + src * 2), (uint16_t)(out_addr + i * 4));
+        lower_const16(buf, 0, (uint16_t)(out_addr + i * 4 + 2));
+    }
+}
+
+/* Test seam: the permutation itself, so a test can prove it is a bijection
+ * without re-deriving it. */
+size_t dsp_bit_reverse_index_test_hook(size_t i, int bits) {
+    return dsp_bit_reverse_index(i, bits);
+}
+
 /* ---- OP_OUTPUT: copy to a fixed, dedicated address ---- */
 
 static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *layout, size_t op_id) {
@@ -711,6 +762,9 @@ int lower_op(const IrGraph *graph, size_t op_id,
             break;
         case OP_WINDOW:
             lower_window(&buf, graph, layout, op_id);
+            break;
+        case OP_BIT_REVERSE:
+            lower_bit_reverse(&buf, graph, layout, op_id);
             break;
         default:
             fprintf(stderr, "lower: op %zu has OpKind %d, which is out of scope for Phase A (ML path only)\n",

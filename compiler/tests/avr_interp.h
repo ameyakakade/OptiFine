@@ -41,6 +41,14 @@ typedef struct {
      * left zero because nothing in this project reads its own code. */
     uint8_t progmem[AVR_INTERP_MEM_SIZE];
     size_t progmem_size;
+
+    /* Cycles actually executed, accumulated from this interpreter's OWN cycle
+     * table (avr_interp.c), which is transcribed from the AVR Instruction Set
+     * Manual independently of the compiler's cost model. Comparing the two is
+     * then a real cross-check rather than a tautology: the compiler predicts
+     * from cost_table.toml categories, the interpreter counts from the manual,
+     * and Avrora measures. All three must agree. */
+    unsigned long cycles;
 } AvrInterp;
 
 #define AVR_INTERP_DEFAULT_BUDGET 20000000UL

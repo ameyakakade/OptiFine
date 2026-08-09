@@ -59,4 +59,7 @@ int lower_op(const IrGraph *graph, size_t op_id,
 int lower_fixed_mul_q15_test_hook(uint16_t a_addr, uint16_t b_addr, uint16_t out_addr,
                                    const CostModel *cost_model, Candidate *out);
 
+/* Test seam for OP_BIT_REVERSE's permutation (see lower.c). */
+size_t dsp_bit_reverse_index_test_hook(size_t i, int bits);
+
 #endif /* OPTIFINE_CODEGEN_LOWER_H */
