@@ -74,7 +74,14 @@ extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
  *   r0, r1        hardwired mul destination. Clobbered by every mul/muls/
  *                 mulsu. Never hold anything across a multiply.
  *   r2            REG_ZERO, always zero, program-global. Read-only here.
- *   r3            unused, reserved.
+ *   r3            REG_DSP_LOOP_COUNTER. Counted-loop trip counter for DSP
+ *                 bodies. It has to live below r16 because every register
+ *                 from r16 up is already committed inside a butterfly body
+ *                 (r16-r23 to the Q15 multiply, r24/r25 to byte scratch,
+ *                 r26-r31 to X/Y/Z), and it must not be one of the DSP32
+ *                 quads either. `ldi` cannot target r0-r15, so
+ *                 instrbuf_loop_begin stages the trip count through
+ *                 REG_SCRATCH0 for counters down here.
  *   r4  - r7      DSP32_A. Caller-owned operand / accumulator.
  *   r8  - r11     DSP32_B. Caller-owned operand.
  *   r12 - r15     DSP32_C. Result / helper-owned temporary. A helper that
@@ -99,6 +106,7 @@ extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
  * the same program. This is the same non-concurrency argument the MatMul
  * cache pool already rests on, applied across paths rather than within
  * one. */
+#define REG_DSP_LOOP_COUNTER 3
 #define DSP32_A 4
 #define DSP32_B 8
 #define DSP32_C 12

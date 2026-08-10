@@ -34,10 +34,7 @@ void avr_interp_init(AvrInterp *interp) {
  * lds/sts with a 16-bit address are 32-bit instructions; everything else this
  * project emits is 16-bit. Calibrated against avr-size on real output. */
 static size_t instr_flash_bytes(const AvrInstr *ins) {
-    if (avr_instr_is_label(ins)) return 0;
-    if (avr_instr_is_data_word(ins)) return 2;
-    if (strcmp(ins->mnemonic, "lds") == 0 || strcmp(ins->mnemonic, "sts") == 0) return 4;
-    return 2;
+    return avr_instr_flash_bytes(ins); /* one definition, shared with codegen */
 }
 
 /* Lays the candidate out at its real flash addresses and fills in the .dw
@@ -77,7 +74,8 @@ static long label_flash_address(const Candidate *c, const char *name) {
 static int avr_interp_cycles(const AvrInstr *ins, int taken) {
     const char *m = ins->mnemonic;
     if (avr_instr_is_label(ins) || avr_instr_is_data_word(ins)) return 0;
-    if (!strcmp(m, "brne")) return taken ? 2 : 1;
+    if (!strcmp(m, "brne") || !strcmp(m, "breq")) return taken ? 2 : 1;
+    if (!strcmp(m, "rjmp")) return 2;
     if (!strcmp(m, "lpm")) return 3;
     if (!strcmp(m, "lds") || !strcmp(m, "sts")) return 2;
     if (!strcmp(m, "ld") || !strcmp(m, "st") ||
@@ -312,8 +310,8 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         interp->zero = (r[rd] == 0) ? 1 : 0; /* dec does not touch Carry */
         return 0;
     }
-    if (strcmp(m, "brne") == 0) { /* control flow -- handled by the caller */
-        return 0;
+    if (strcmp(m, "brne") == 0 || strcmp(m, "breq") == 0 || strcmp(m, "rjmp") == 0) {
+        return 0; /* control flow -- handled by avr_interp_run */
     }
     if (strcmp(m, "movw") == 0) {
         int rd = reg_of(instr->operands[0]), rr = reg_of(instr->operands[1]);
@@ -428,15 +426,15 @@ int avr_interp_run(AvrInterp *interp, const Candidate *candidate) {
         if (avr_interp_step(interp, ins) != 0) {
             return -1;
         }
-        if (strcmp(ins->mnemonic, "brne") == 0) {
-            interp->cycles += avr_interp_cycles(ins, !interp->zero);
-        } else {
-            interp->cycles += avr_interp_cycles(ins, 0);
-        }
-        if (strcmp(ins->mnemonic, "brne") == 0 && !interp->zero) {
+        int is_brne = !strcmp(ins->mnemonic, "brne");
+        int is_breq = !strcmp(ins->mnemonic, "breq");
+        int is_rjmp = !strcmp(ins->mnemonic, "rjmp");
+        int take = is_rjmp || (is_brne && !interp->zero) || (is_breq && interp->zero);
+        interp->cycles += avr_interp_cycles(ins, (is_brne || is_breq) ? take : 0);
+        if ((is_brne || is_breq || is_rjmp) && take) {
             long target = find_label(candidate, ins->operands[0]);
             if (target < 0) {
-                fprintf(stderr, "avr_interp: brne to unknown label '%s'\n", ins->operands[0]);
+                fprintf(stderr, "avr_interp: branch to unknown label '%s'\n", ins->operands[0]);
                 return -1;
             }
             pc = (size_t)target;

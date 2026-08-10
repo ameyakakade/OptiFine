@@ -8,6 +8,7 @@
 #include <assert.h>
 
 #include "optifine/codegen/cost_category.h"
+#include "optifine/codegen/registers.h"
 
 /* Must stay in sync with cost_table.toml's per-cycle constant; see
  * SOURCES.md "Per-cycle energy constant". */
@@ -117,16 +118,62 @@ void instrbuf_loop_begin(InstrBuf *b, LoopCtx *ctx, uint32_t trip, int counter_r
     /* 256 iterations are expressed as ldi 0: dec wraps 0 -> 255 and the loop
      * runs the full 256 times, the standard AVR counted-loop idiom. */
     fmt_imm(imm, (uint8_t)(trip & 0xFF));
-    ins2(b, "ldi", r, imm);
+    if (counter_reg >= 16) {
+        ins2(b, "ldi", r, imm);
+    } else {
+        /* ldi can only target r16-r31. A DSP butterfly body has no free
+         * register up there -- r16-r23 belong to the Q15 multiply, r24/r25 to
+         * byte scratch, r26-r31 to the pointers -- so the counter lives lower
+         * and the constant is staged through REG_SCRATCH0, which every such
+         * body reloads before its own first use. Clobbering it here is
+         * therefore free, and stated rather than assumed. */
+        char t[AVR_OPERAND_LEN];
+        fmt_reg(t, REG_SCRATCH0);
+        ins2(b, "ldi", t, imm);
+        ins2(b, "mov", r, t);
+    }
     ins1(b, AVR_LABEL_MNEMONIC, ctx->label);
     ctx->body_first = b->count;
 }
+
+size_t avr_instr_flash_bytes(const AvrInstr *ins) {
+    if (avr_instr_is_label(ins)) return 0;
+    if (avr_instr_is_data_word(ins)) return 2;
+    /* lds/sts with a 16-bit address are the only 32-bit encodings this
+     * project emits; everything else is a single 16-bit word. */
+    if (!strcmp(ins->mnemonic, "lds") || !strcmp(ins->mnemonic, "sts")) return 4;
+    return 2;
+}
+
+/* BRNE is a 7-bit PC-relative branch: it reaches -64..+63 WORDS from the
+ * instruction after it. A butterfly body is several hundred bytes, so the
+ * backward branch to the loop head does not fit and the assembler rejects it
+ * with "relocation truncated to fit: R_AVR_7_PCREL". RJMP's 12-bit word
+ * offset (+/-2K words) covers every body this project emits. */
+#define AVR_BRNE_REACH_WORDS 64
+#define AVR_RJMP_REACH_WORDS 2048
 
 void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx) {
     char r[AVR_OPERAND_LEN];
     fmt_reg(r, ctx->counter_reg);
     ins1(b, "dec", r);
-    ins1(b, "brne", ctx->label);
+
+    /* Distance from the branch back to the loop label, in words. */
+    size_t bytes = 0;
+    for (size_t i = ctx->body_first; i < b->count; i++) bytes += avr_instr_flash_bytes(&b->items[i]);
+    size_t words = bytes / 2 + 1;
+
+    if (words <= AVR_BRNE_REACH_WORDS) {
+        ins1(b, "brne", ctx->label);
+    } else {
+        /* Invert: skip past an unconditional jump back to the head. */
+        assert(words <= AVR_RJMP_REACH_WORDS);
+        char exit_label[AVR_OPERAND_LEN];
+        snprintf(exit_label, AVR_OPERAND_LEN, ".Lex%zu", ctx->region);
+        ins1(b, "breq", exit_label);
+        ins1(b, "rjmp", ctx->label);
+        ins1(b, AVR_LABEL_MNEMONIC, exit_label);
+    }
     b->loops[ctx->region].first = ctx->body_first;
     b->loops[ctx->region].last = b->count - 1; /* includes dec + brne */
     b->loops[ctx->region].trip = ctx->trip;
@@ -175,9 +222,14 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
         }
         energy_nj += entry->energy_nj * (double)repeat;
     }
-    /* BRANCH is priced at BRNE's taken cost (2 cycles). Each loop falls
-     * through exactly once at 1 cycle, so give back one cycle per region --
-     * exact rather than approximately right. */
+    /* Conditional branches are priced at their TAKEN cost (2 cycles), but a
+     * counted loop resolves the opposite way exactly once:
+     *   short form  `dec / brne head`   -- brne falls through once (1 not 2)
+     *   long form   `dec / breq exit / rjmp head` -- breq is NOT taken on
+     *               every iteration but the last, so it costs 1 rather than
+     *               2 for (trip-1) iterations, and the rjmp does not execute
+     *               at all on the final iteration.
+     * Both corrections are exact, not approximations. */
     for (size_t l = 0; l < buf->num_loops; l++) {
         uint32_t outer = 1;
         for (size_t o = 0; o < buf->num_loops; o++) {
@@ -186,7 +238,20 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
                 outer *= buf->loops[o].trip;
             }
         }
-        energy_nj -= AVR_CYCLE_ENERGY_NJ * (double)outer;
+        int is_long = 0;
+        for (size_t i = buf->loops[l].first; i <= buf->loops[l].last; i++) {
+            if (!strcmp(buf->items[i].mnemonic, "rjmp")) { is_long = 1; break; }
+        }
+        uint32_t trip = buf->loops[l].trip;
+        double give_back;
+        if (is_long) {
+            /* breq not taken for trip-1 iterations: -1 cycle each.
+             * rjmp skipped on the final iteration: -2 cycles once. */
+            give_back = (double)(trip - 1) * 1.0 + 2.0;
+        } else {
+            give_back = 1.0; /* brne falls through once */
+        }
+        energy_nj -= AVR_CYCLE_ENERGY_NJ * give_back * (double)outer;
     }
     out->instructions = buf->items;
     out->num_instructions = buf->count;

@@ -97,6 +97,8 @@ int avr_instr_is_label(const AvrInstr *instr);
  * is silently dropped and its label resolves to 0x0000, which would make `lpm`
  * read instruction bytes as data. Verified empirically, not assumed. */
 int avr_instr_is_data_word(const AvrInstr *instr);
+/* Flash footprint of one emitted entry, matching the real AVR encoding. */
+size_t avr_instr_flash_bytes(const AvrInstr *instr);
 #define AVR_DATA_WORD_MNEMONIC ".dw"
 void ins_data_word(InstrBuf *b, uint16_t value);
 

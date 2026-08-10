@@ -12,6 +12,7 @@
 
 #include "optifine/codegen/candidates.h"
 #include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/ir.h"
@@ -58,6 +59,16 @@ int lower_op(const IrGraph *graph, size_t op_id,
  * comment. Not part of the codegen pipeline's real call path. */
 int lower_fixed_mul_q15_test_hook(uint16_t a_addr, uint16_t b_addr, uint16_t out_addr,
                                    const CostModel *cost_model, Candidate *out);
+
+/* Canonical Q15 twiddle, shared by the table emitter and the tests' oracle. */
+void dsp_twiddle_q15(int k, int16_t *wr, int16_t *wi);
+/* Emits the 32-entry canonical twiddle table as program-memory data. Must be
+ * placed where control flow cannot reach it. */
+void dsp_emit_twiddle_table(InstrBuf *buf);
+
+int lower_fft_stage0_test_hook(const IrGraph *graph, size_t op_id,
+                                const SramLayout *layout, const CostModel *cost_model,
+                                Candidate *out);
 
 /* Test seam for OP_BIT_REVERSE's permutation (see lower.c). */
 size_t dsp_bit_reverse_index_test_hook(size_t i, int bits);

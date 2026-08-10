@@ -63,6 +63,7 @@ static const CategoryEntry kCategories[] = {
     {"adiw", "COMPLEX_ADD"},
     {"sbiw", "COMPLEX_ADD"},
     {"brne", "COMPLEX_ADD"},
+    {"breq", "COMPLEX_ADD"},   /* same 2-cycle taken cost as BRNE */
 
     /* Comparisons, logical shift and exclusive-or: all 1-cycle ALU ops, placed
      * in 1-cycle families. `lsr` is deliberately separate from `asr`: the
@@ -86,6 +87,10 @@ static const CategoryEntry kCategories[] = {
  * the energy model. */
 static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
     {"lpm", 3},
+    /* RJMP is 2 cycles and unconditional. It exists here because BRNE only
+     * reaches +/-64 words; a DSP butterfly body is several hundred bytes, so
+     * a long loop closes with an inverted BREQ over an RJMP instead. */
+    {"rjmp", 2},
     /* BREAK halts the simulator and costs 1 cycle. This is the "+1 fixed
      * harness overhead" the Phase A write-up already accounts for by hand
      * (sim/fixtures/bringup_smoke.avrora.txt: 7 instruction cycles, 8

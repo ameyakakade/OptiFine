@@ -51,6 +51,12 @@ void dsp32_neg(InstrBuf *b, int dst) {
     for (int i = 1; i < DSP32_BYTES; i++) { reg(d, dst + i); ins2(b, "adc", d, z); }
 }
 
+void dsp32_lsl(InstrBuf *b, int dst) {
+    char d[AVR_OPERAND_LEN];
+    reg(d, dst + 0); ins1(b, "lsl", d);                          /* zero into bit 0 */
+    for (int i = 1; i < DSP32_BYTES; i++) { reg(d, dst + i); ins1(b, "rol", d); }
+}
+
 void dsp32_lsr(InstrBuf *b, int dst) {
     char d[AVR_OPERAND_LEN];
     reg(d, dst + DSP32_BYTES - 1); ins1(b, "lsr", d);           /* zero into bit 7 */

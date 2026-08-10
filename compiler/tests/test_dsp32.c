@@ -148,6 +148,41 @@ static void test_neg_and_lsr(void) {
 
 /* dsp32_cmp leaves its answer in the carry flag; materialise it with the
  * sbc idiom so the test can observe it. */
+static const int16_t kI16[] = {0, 1, -1, 2, -2, 127, -128, 255, -256, 256, -257,
+                                32767, -32768, 32766, -32767, 181, -181, 16384, -16384};
+#define I16_N (sizeof(kI16) / sizeof(kI16[0]))
+
+static void test_lsl_and_q15_extract(void) {
+    /* dsp32_lsl is exact for the whole corpus... */
+    for (size_t i = 0; i < CORPUS_N; i++) {
+        uint32_t a = kCorpus32[i];
+        InstrBuf b; instrbuf_init(&b);
+        dsp32_load(&b, DSP32_A, A_ADDR); dsp32_lsl(&b, DSP32_A); dsp32_store(&b, DSP32_A, R_ADDR);
+        assert(run(&b, a, 0, NULL) == (uint32_t)(a << 1));
+    }
+    /* ...and the composition that matters: a Q15 product is (x*y) >> 15,
+     * which equals the top two bytes of (x*y) << 1. Checked against the host
+     * definition for every int16 corpus pair. */
+    for (size_t i = 0; i < I16_N; i++) {
+        for (size_t j = 0; j < I16_N; j++) {
+            int16_t x = kI16[i], y = kI16[j];
+            InstrBuf b; instrbuf_init(&b);
+            dsp16_load(&b, REG_DSP_OP_A_LO, REG_DSP_OP_A_HI, A_ADDR);
+            dsp16_load(&b, REG_DSP_OP_B_LO, REG_DSP_OP_B_HI, B_ADDR);
+            dsp32_mul16x16(&b, DSP32_A, REG_DSP_OP_A_LO, REG_DSP_OP_A_HI,
+                            REG_DSP_OP_B_LO, REG_DSP_OP_B_HI);
+            dsp32_lsl(&b, DSP32_A);
+            dsp32_store(&b, DSP32_A, R_ADDR);
+            uint32_t got = run(&b, (uint32_t)(uint16_t)x, (uint32_t)(uint16_t)y, NULL);
+            int16_t q15 = (int16_t)(got >> 16);                 /* top two bytes */
+            int16_t want = (int16_t)(((int32_t)x * (int32_t)y) >> 15);
+            if (q15 != want) printf("  q15 FAIL %d*%d got=%d want=%d\n", x, y, q15, want);
+            assert(q15 == want);
+        }
+    }
+    printf("  lsl/q15: corpus exact; (x*y)<<1 top two bytes == (x*y)>>15 for %zu pairs\n", I16_N*I16_N);
+}
+
 static void test_cmp_unsigned(void) {
     for (size_t i = 0; i < CORPUS_N; i++) {
         for (size_t j = 0; j < CORPUS_N; j++) {
@@ -180,9 +215,6 @@ static void test_cmp_unsigned(void) {
     printf("  cmp: %zu corpus pairs + 3000 random -> exact unsigned ordering\n", CORPUS_N * CORPUS_N);
 }
 
-static const int16_t kI16[] = {0, 1, -1, 2, -2, 127, -128, 255, -256, 256, -257,
-                                32767, -32768, 32766, -32767, 181, -181, 16384, -16384};
-#define I16_N (sizeof(kI16) / sizeof(kI16[0]))
 
 static void test_mul16x16(void) {
     for (size_t i = 0; i < I16_N; i++) {
@@ -444,6 +476,7 @@ int main(void) {
     test_add_sub();
     test_sext16();
     test_neg_and_lsr();
+    test_lsl_and_q15_extract();
     test_cmp_unsigned();
     test_mul16x16();
     test_magnitude_composition_and_bounds();

@@ -36,6 +36,12 @@ void dsp32_sub(InstrBuf *b, int dst, int src);
 /* dst = -dst, two's complement across all four bytes. */
 void dsp32_neg(InstrBuf *b, int dst);
 
+/* dst <<= 1. Used to turn a 32-bit product into a Q15 result: the Q15
+ * product is (x*y) >> 15, and shifting the 32-bit product left by one makes
+ * the wanted bits land in the top two bytes, which is cheaper than a 15-step
+ * right shift and exact. */
+void dsp32_lsl(InstrBuf *b, int dst);
+
 /* dst >>= 1, LOGICAL (zero shifted in). The isqrt32 working values are
  * unsigned, so an arithmetic shift would smear a sign bit that is really a
  * magnitude bit. */
