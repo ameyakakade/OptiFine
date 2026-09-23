@@ -29,8 +29,13 @@
  * temporaries + 1 masked-select scratch + a 64-element magnitude
  * working copy for PeakExtract + 5 peak-selection cells (best,
  * best_idx, cand_idx, mask, select_tmp), all 2 bytes wide:
- * (4+1+2+2+1+8+2+1+64+5)*2 = 180. */
-#define DSP_SCRATCH_BYTES 180
+ * (4+1+2+2+1+8+2+1+64+5)*2 = 180 -- plus one byte appended after that map
+ * for the FFT's per-block loop counter (DSP_SCRATCH_FFT_OUTER_COUNT), 181.
+ *
+ * The FFT butterfly's own cells (lower.c's BF_*, offsets 0-25) are only live
+ * inside one OP_FFT_BUTTERFLY and are dead before any later op runs. */
+#define DSP_SCRATCH_FFT_OUTER_COUNT 180 /* 1 byte: remaining blocks in one FFT stage */
+#define DSP_SCRATCH_BYTES 181
 
 typedef struct {
     uint16_t *op_addr; /* indexed by op id -> base SRAM address of that op's output tensor */

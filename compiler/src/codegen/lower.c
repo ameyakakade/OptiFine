@@ -595,13 +595,42 @@ size_t dsp_bit_reverse_index_test_hook(size_t i, int bits) {
  * No saturation is performed: the per-stage halving is what bounds growth,
  * and the invariant |out| <= max(|p|,|t|) keeps every value inside Q15.
  *
- * Structure is a counted loop over the stage's butterflies with the body
- * emitted once. Data addresses advance through X (input) and Y (output);
+ * Structure: the butterfly body is emitted once per stage and run from
+ * counted loops. Data addresses advance through X (input) and Y (output);
  * the twiddle comes from the canonical 32-entry program-memory table through
  * Z. Intermediates live at fixed scratch addresses, which are loop-invariant
  * even though the data addresses are not, so the already-validated
  * lower_fixed_mul_q15 / lower_add16 / lower_sub16 / lower_asr16 helpers apply
- * unchanged. */
+ * unchanged.
+ *
+ * Geometry of stage s (half = 2^s, blocks = 32/half, span = 4*half bytes
+ * between a butterfly's p and q):
+ *
+ *     stage  blocks  half  twiddle k = j*blocks   Z step after 4x lpm Z+
+ *       0      32      1   0                      -4  (W^0 reused)
+ *       1      16      2   0,16                   +60
+ *       2       8      4   0,8,..,24              +28
+ *       3       4      8   0,4,..,28              +12
+ *       4       2     16   0,2,..,30              +4
+ *       5       1     32   0,1,..,31              0
+ *
+ * Stage 0 is one flat loop of 32: p and q are adjacent, so X and Y walk the
+ * buffers without ever stepping back. Stages 1-5 are nested: a block loop
+ * resets Z to the table base and wraps a loop of `half` butterflies, and each
+ * butterfly steps X/Y forward by span-4 from p to q and back by span to the
+ * next p. After the butterfly loop X/Y sit at block_start+span, so the block
+ * loop adds span to reach the next block. Stage 5 has a single block and no
+ * block loop.
+ *
+ * The butterfly loop holds REG_DSP_LOOP_COUNTER (r3), and the body owns every
+ * register from r16 up, so the block counter lives in one SRAM byte
+ * (DSP_SCRATCH_FFT_OUTER_COUNT) touched only at block boundaries -- 7-8
+ * cycles per block instead of a permanently reserved register.
+ *
+ * Buffers: every stage reads its input op's tensor and writes its own, which
+ * sram_layout places in disjoint regions, so no stage overwrites a value it
+ * has yet to read. BitReverse -> stage 0 -> ... -> stage 5, and the final
+ * transform is stage 5's buffer. */
 
 /* Butterfly scratch cells, offsets within layout->dsp_scratch_addr. */
 #define BF_AC   0
@@ -618,6 +647,10 @@ size_t dsp_bit_reverse_index_test_hook(size_t i, int bits) {
 #define BF_QIM  22
 #define BF_HALF 24
 #define BF_SCRATCH_BYTES 26
+_Static_assert(BF_SCRATCH_BYTES <= DSP_SCRATCH_FFT_OUTER_COUNT,
+               "butterfly scratch must not reach the FFT block counter");
+_Static_assert(DSP_SCRATCH_FFT_OUTER_COUNT < DSP_SCRATCH_BYTES,
+               "FFT block counter must lie inside the reserved DSP scratch region");
 
 #define DSP_TWIDDLE_LABEL ".Ltw"
 #define DSP_TWIDDLE_ENTRIES 32
@@ -668,52 +701,52 @@ static void load_ptr_imm(InstrBuf *buf, int lo_reg, uint16_t addr) {
     fmt_reg(r, lo_reg + 1); fmt_hi8(imm, addr); ins2(buf, "ldi", r, imm);
 }
 
-static void lower_fft_butterfly_stage(InstrBuf *buf, const IrGraph *graph,
-                                       const SramLayout *layout, size_t op_id, int stage) {
-    const IrOp *op = &graph->ops[op_id];
-    size_t in_id = op->inputs[0];
-    uint16_t in_addr = sram_layout_addr(layout, graph, in_id, 0);
-    uint16_t out_addr = sram_layout_addr(layout, graph, op_id, 0);
-    uint16_t sc = layout->dsp_scratch_addr;
+/* Adds a signed compile-time constant to pointer pair lo_reg:lo_reg+1.
+ * ADIW/SBIW reach 0..63; past that, SUBI/SBCI subtract the negated constant.
+ * Both forms take 2 cycles; the second is one word longer. */
+static void ptr_add(InstrBuf *buf, int lo_reg, int delta) {
+    char lo[AVR_OPERAND_LEN], hi[AVR_OPERAND_LEN], imm[AVR_OPERAND_LEN];
+    fmt_reg(lo, lo_reg);
+    if (delta == 0) return;
+    if (delta > 0 && delta <= 63) {
+        fmt_imm(imm, (uint8_t)delta);
+        ins2(buf, "adiw", lo, imm);
+        return;
+    }
+    if (delta < 0 && delta >= -63) {
+        fmt_imm(imm, (uint8_t)-delta);
+        ins2(buf, "sbiw", lo, imm);
+        return;
+    }
+    uint16_t neg = (uint16_t)-delta;
+    fmt_reg(hi, lo_reg + 1);
+    fmt_imm(imm, (uint8_t)(neg & 0xFF));
+    ins2(buf, "subi", lo, imm);
+    fmt_imm(imm, (uint8_t)(neg >> 8));
+    ins2(buf, "sbci", hi, imm);
+}
 
-    size_t half_block = (size_t)1 << stage;
-    size_t num_blocks = DSP_FFT_SIZE / (half_block * 2);
-    /* Stage 0 only for now: adjacent pairs, one butterfly per block, and the
-     * twiddle is W^0 for every butterfly, so Z never advances between them. */
-    assert(stage == 0);
-    size_t butterflies = num_blocks * half_block;
-
-    load_ptr_imm(buf, 26, in_addr);   /* X */
-    load_ptr_imm(buf, 28, out_addr);  /* Y */
-    char zl[AVR_OPERAND_LEN], zh[AVR_OPERAND_LEN], sym[AVR_OPERAND_LEN];
-    fmt_reg(zl, 30); fmt_reg(zh, 31);
-    fmt_lo8_sym(sym, DSP_TWIDDLE_LABEL, 0); ins2(buf, "ldi", zl, sym);
-    fmt_hi8_sym(sym, DSP_TWIDDLE_LABEL, 0); ins2(buf, "ldi", zh, sym);
-
-    LoopCtx loop;
-    instrbuf_loop_begin(buf, &loop, (uint32_t)butterflies, REG_DSP_LOOP_COUNTER);
-
-    /* twiddle: four program-memory bytes, then rewind Z. Stage 0's stride
-     * through the canonical table is zero entries, so the rewind is exactly
-     * the four bytes just consumed; later stages replace this with an
-     * adiw of (stride_entries*4 - 4). */
+/* One butterfly: twiddle from Z, p and q from X, out[p] and out[q] to Y.
+ * `z_step` is applied after the four lpm Z+ loads; `to_q` after reading or
+ * writing p, `to_next_p` after reading or writing q. Stage 0 passes 0/0,
+ * since its q directly follows p and its next p directly follows q. */
+static void emit_butterfly(InstrBuf *buf, uint16_t sc, int z_step, int to_q, int to_next_p) {
     ptr_byte_to_scratch(buf, 'Z', (uint16_t)(sc + BF_TWRE));
     ptr_byte_to_scratch(buf, 'Z', (uint16_t)(sc + BF_TWRE + 1));
     ptr_byte_to_scratch(buf, 'Z', (uint16_t)(sc + BF_TWIM));
     ptr_byte_to_scratch(buf, 'Z', (uint16_t)(sc + BF_TWIM + 1));
-    char imm[AVR_OPERAND_LEN];
-    fmt_imm(imm, 4);
-    ins2(buf, "sbiw", zl, imm);
+    ptr_add(buf, 30, z_step);
 
-    /* p then q, eight bytes straight off X */
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_PRE));
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_PRE + 1));
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_PIM));
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_PIM + 1));
+    ptr_add(buf, 26, to_q);
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_QRE));
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_QRE + 1));
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_QIM));
     ptr_byte_to_scratch(buf, 'X', (uint16_t)(sc + BF_QIM + 1));
+    ptr_add(buf, 26, to_next_p);
 
     /* t = W * q */
     lower_fixed_mul_q15(buf, (uint16_t)(sc + BF_TWRE), (uint16_t)(sc + BF_QRE), (uint16_t)(sc + BF_AC));
@@ -733,17 +766,68 @@ static void lower_fft_butterfly_stage(InstrBuf *buf, const IrGraph *graph,
     lower_add16(buf, (uint16_t)(sc + BF_HALF), (uint16_t)(sc + BF_TIM), (uint16_t)(sc + BF_AD));
     lower_sub16(buf, (uint16_t)(sc + BF_HALF), (uint16_t)(sc + BF_TIM), (uint16_t)(sc + BF_BC));
 
-    /* out[p] then out[q], eight bytes straight onto Y */
+    /* out[p] then out[q] */
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_AC), 'Y');
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_AC + 1), 'Y');
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_AD), 'Y');
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_AD + 1), 'Y');
+    ptr_add(buf, 28, to_q);
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_BD), 'Y');
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_BD + 1), 'Y');
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_BC), 'Y');
     scratch_byte_to_ptr(buf, (uint16_t)(sc + BF_BC + 1), 'Y');
+    ptr_add(buf, 28, to_next_p);
+}
 
-    instrbuf_loop_end(buf, &loop);
+static void load_twiddle_base(InstrBuf *buf) {
+    char zl[AVR_OPERAND_LEN], zh[AVR_OPERAND_LEN], sym[AVR_OPERAND_LEN];
+    fmt_reg(zl, 30); fmt_reg(zh, 31);
+    fmt_lo8_sym(sym, DSP_TWIDDLE_LABEL, 0); ins2(buf, "ldi", zl, sym);
+    fmt_hi8_sym(sym, DSP_TWIDDLE_LABEL, 0); ins2(buf, "ldi", zh, sym);
+}
+
+static void lower_fft_butterfly_stage(InstrBuf *buf, const IrGraph *graph,
+                                       const SramLayout *layout, size_t op_id, int stage) {
+    const IrOp *op = &graph->ops[op_id];
+    size_t in_id = op->inputs[0];
+    uint16_t in_addr = sram_layout_addr(layout, graph, in_id, 0);
+    uint16_t out_addr = sram_layout_addr(layout, graph, op_id, 0);
+    uint16_t sc = layout->dsp_scratch_addr;
+
+    assert(stage >= 0 && stage < DSP_FFT_LOG2);
+    int half = 1 << stage;
+    int blocks = DSP_FFT_SIZE / (half * 2);
+    int span = half * 4; /* bytes from p to q */
+
+    load_ptr_imm(buf, 26, in_addr);   /* X */
+    load_ptr_imm(buf, 28, out_addr);  /* Y */
+
+    if (half == 1) {
+        /* Stage 0: W^0 throughout, so Z rewinds over the four bytes it just
+         * read, and X/Y run straight through the buffers. */
+        load_twiddle_base(buf);
+        LoopCtx loop;
+        instrbuf_loop_begin(buf, &loop, (uint32_t)blocks, REG_DSP_LOOP_COUNTER);
+        emit_butterfly(buf, sc, -4, 0, 0);
+        instrbuf_loop_end(buf, &loop);
+        return;
+    }
+
+    LoopCtx block_loop;
+    if (blocks > 1) {
+        instrbuf_loop_begin_sram(buf, &block_loop, (uint32_t)blocks,
+                                 (uint16_t)(sc + DSP_SCRATCH_FFT_OUTER_COUNT));
+    }
+    load_twiddle_base(buf);
+    LoopCtx bf_loop;
+    instrbuf_loop_begin(buf, &bf_loop, (uint32_t)half, REG_DSP_LOOP_COUNTER);
+    emit_butterfly(buf, sc, blocks * 4 - 4, span - 4, -span);
+    instrbuf_loop_end(buf, &bf_loop);
+    if (blocks > 1) {
+        ptr_add(buf, 26, span);
+        ptr_add(buf, 28, span);
+        instrbuf_loop_end(buf, &block_loop);
+    }
 }
 
 /* Which OP_FFT_BUTTERFLY this op is, by position among the graph's others. */
@@ -765,6 +849,32 @@ int lower_fft_stage0_test_hook(const IrGraph *graph, size_t op_id,
     InstrBuf buf;
     instrbuf_init(&buf);
     lower_fft_butterfly_stage(&buf, graph, layout, op_id, 0);
+    ins0(&buf, "break");
+    dsp_emit_twiddle_table(&buf);
+    return instrbuf_price(&buf, cost_model, out);
+}
+
+/* Test/fixture seam: FFT stages first..last as one self-contained program,
+ * laid out exactly like the stage 0 seam. Each stage reads the previous
+ * stage's buffer, so a run leaves every intermediate stage output in SRAM for
+ * the tests to check one by one. */
+int lower_fft_stages_test_hook(const IrGraph *graph, int first_stage, int last_stage,
+                               const SramLayout *layout, const CostModel *cost_model,
+                               Candidate *out) {
+    if (first_stage < 0 || last_stage >= DSP_FFT_LOG2 || first_stage > last_stage) {
+        fprintf(stderr, "lower: bad FFT stage range %d..%d\n", first_stage, last_stage);
+        return -1;
+    }
+    InstrBuf buf;
+    instrbuf_init(&buf);
+    int stage = 0;
+    for (size_t i = 0; i < graph->count; i++) {
+        if (graph->ops[i].kind != OP_FFT_BUTTERFLY) continue;
+        if (stage >= first_stage && stage <= last_stage) {
+            lower_fft_butterfly_stage(&buf, graph, layout, i, stage);
+        }
+        stage++;
+    }
     ins0(&buf, "break");
     dsp_emit_twiddle_table(&buf);
     return instrbuf_price(&buf, cost_model, out);
@@ -975,9 +1085,9 @@ int lower_op(const IrGraph *graph, size_t op_id,
             break;
         case OP_FFT_BUTTERFLY: {
             int stage = dsp_butterfly_stage_index(graph, op_id);
-            if (stage != 0) {
-                fprintf(stderr, "lower: FFT stage %d is not implemented yet "
-                                "(stage 0 is the current checkpoint)\n", stage);
+            if (stage >= DSP_FFT_LOG2) {
+                fprintf(stderr, "lower: FFT stage %d exceeds the %d stages of a %d-point transform\n",
+                        stage, DSP_FFT_LOG2, DSP_FFT_SIZE);
                 free(buf.items);
                 return -1;
             }

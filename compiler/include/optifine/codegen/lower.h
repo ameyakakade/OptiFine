@@ -70,6 +70,12 @@ int lower_fft_stage0_test_hook(const IrGraph *graph, size_t op_id,
                                 const SramLayout *layout, const CostModel *cost_model,
                                 Candidate *out);
 
+/* FFT stages first_stage..last_stage (0-based, inclusive) followed by break
+ * and the twiddle table, as one self-contained program. */
+int lower_fft_stages_test_hook(const IrGraph *graph, int first_stage, int last_stage,
+                               const SramLayout *layout, const CostModel *cost_model,
+                               Candidate *out);
+
 /* Test seam for OP_BIT_REVERSE's permutation (see lower.c). */
 size_t dsp_bit_reverse_index_test_hook(size_t i, int bits);
 

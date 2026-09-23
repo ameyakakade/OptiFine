@@ -32,13 +32,32 @@ static void test_dsp_graph_layout_succeeds_and_reserves_scratch(void) {
     assert(layout.dsp_scratch_addr >= SRAM_LAYOUT_BASE + layout.bytes_used - DSP_SCRATCH_BYTES);
     assert((uint32_t)layout.dsp_scratch_addr + DSP_SCRATCH_BYTES <= (uint32_t)SRAM_LAYOUT_LIMIT);
 
+    /* Measured footprint: 2,336 bytes of tensors (three 128-byte real
+     * buffers, BitReverse + six FFT stages at 256 bytes, Magnitude 128,
+     * PeakExtract and Output 16 each) plus the scratch region. */
+    printf("  DSP SRAM: %u bytes of %d (scratch %d at 0x%04X)\n", layout.bytes_used,
+           SRAM_LAYOUT_LIMIT - 0x0100, DSP_SCRATCH_BYTES, layout.dsp_scratch_addr);
+    assert(layout.bytes_used == 2336 + DSP_SCRATCH_BYTES);
+    assert(DSP_SCRATCH_BYTES == 181);
+
     sram_layout_free(&layout);
     ir_graph_free(&graph);
+}
+
+/* The FFT block counter sits after the documented 0-179 scratch map
+ * (butterfly cells 0-25, the planned Magnitude cells 18-41 and PeakExtract
+ * cells 42-179), so it overlaps none of them, and inside the region. */
+static void test_fft_block_counter_has_its_own_cell(void) {
+    assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 26);   /* past the butterfly's BF_* cells */
+    assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 42);   /* past planned Magnitude 18-41 */
+    assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 180);  /* past planned PeakExtract 42-179 */
+    assert(DSP_SCRATCH_FFT_OUTER_COUNT + 1 <= DSP_SCRATCH_BYTES);
 }
 
 int main(void) {
     test_elem_sizes();
     test_dsp_graph_layout_succeeds_and_reserves_scratch();
+    test_fft_block_counter_has_its_own_cell();
     printf("test_sram_layout_dsp: all tests passed\n");
     return 0;
 }
