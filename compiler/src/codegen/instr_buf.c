@@ -95,10 +95,44 @@ void fmt_hi8(char *out, uint16_t addr) {
     snprintf(out, AVR_OPERAND_LEN, "0x%02X", (unsigned)((addr >> 8) & 0xFF));
 }
 
-/* Label names are unique per InstrBuf, which is all that is needed: each
- * Candidate is emitted as its own straight run of assembly and never spliced
- * into another. Named after the loop's region index so a label in generated
- * assembly maps back to a region in the pricing table. */
+/* Loop labels are named after the loop's region index, so within one
+ * Candidate a label maps back to a region in the pricing table. That makes
+ * them unique per Candidate only; emit.h's EmitUnit renumbers them when
+ * candidates are concatenated into one assembly unit. */
+#define LOCAL_HEAD_FMT ".Ldsp%u"
+#define LOCAL_EXIT_FMT ".Lex%u"
+
+static int parse_local(const char *name, const char *prefix, unsigned *index) {
+    size_t n = strlen(prefix);
+    if (strncmp(name, prefix, n) != 0) return 0;
+    const char *d = name + n;
+    if (*d < '0' || *d > '9') return 0;
+    unsigned v = 0;
+    for (; *d; d++) {
+        if (*d < '0' || *d > '9') return 0;
+        v = v * 10 + (unsigned)(*d - '0');
+    }
+    *index = v;
+    return 1;
+}
+
+int avr_local_label_index(const char *name, unsigned *index) {
+    return parse_local(name, ".Ldsp", index) || parse_local(name, ".Lex", index);
+}
+
+int avr_local_label_rebase(const char *name, unsigned base, char *out) {
+    unsigned idx;
+    int n;
+    if (parse_local(name, ".Ldsp", &idx)) {
+        n = snprintf(out, AVR_OPERAND_LEN, LOCAL_HEAD_FMT, base + idx);
+    } else if (parse_local(name, ".Lex", &idx)) {
+        n = snprintf(out, AVR_OPERAND_LEN, LOCAL_EXIT_FMT, base + idx);
+    } else {
+        return 0;
+    }
+    assert(n > 0 && n < AVR_OPERAND_LEN);
+    return 1;
+}
 
 static void loop_open(InstrBuf *b, LoopCtx *ctx, uint32_t trip) {
     /* trip must fit the 8-bit counter `dec` drives, and a zero trip would
@@ -110,7 +144,7 @@ static void loop_open(InstrBuf *b, LoopCtx *ctx, uint32_t trip) {
     assert(b->num_loops < INSTRBUF_MAX_LOOPS);
     ctx->trip = trip;
     ctx->region = b->num_loops++;
-    snprintf(ctx->label, AVR_OPERAND_LEN, ".Ldsp%zu", ctx->region);
+    snprintf(ctx->label, AVR_OPERAND_LEN, LOCAL_HEAD_FMT, (unsigned)ctx->region);
 }
 
 static void loop_place_label(InstrBuf *b, LoopCtx *ctx) {
@@ -203,7 +237,7 @@ void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx) {
         /* Invert: skip past an unconditional jump back to the head. */
         assert(words <= AVR_RJMP_REACH_WORDS);
         char exit_label[AVR_OPERAND_LEN];
-        snprintf(exit_label, AVR_OPERAND_LEN, ".Lex%zu", ctx->region);
+        snprintf(exit_label, AVR_OPERAND_LEN, LOCAL_EXIT_FMT, (unsigned)ctx->region);
         ins1(b, "breq", exit_label);
         ins1(b, "rjmp", ctx->label);
         ins1(b, AVR_LABEL_MNEMONIC, exit_label);

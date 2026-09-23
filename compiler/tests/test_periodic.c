@@ -24,7 +24,8 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
                                 const RegAllocResult *regalloc, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
-                                FILE *out, ProgramRegionCost *out_cost) {
+                                EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
+    (void)unit;
     (void)graph;
     (void)layout;
     (void)regalloc;
@@ -41,7 +42,8 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
                                 const RegAllocResult *regalloc, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
-                                FILE *out, ProgramRegionCost *out_cost) {
+                                EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
+    (void)unit;
     (void)graph;
     (void)layout;
     (void)regalloc;

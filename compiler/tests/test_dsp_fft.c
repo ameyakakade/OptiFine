@@ -478,10 +478,12 @@ static void emit_fixture(Fx *f, const char *path) {
 
     FILE *out = fopen(path, "w");
     assert(out);
+    EmitUnit unit;
+    emit_unit_init(&unit);
     emit_program_prologue(out);
-    emit_candidate(&harness, out);
+    assert(emit_candidate(&unit, &harness, out) == 0);
     fprintf(out, "\n    ; ---- FFT stages 0-5 ----\n");
-    emit_candidate(&fft, out);
+    assert(emit_candidate(&unit, &fft, out) == 0);
     fclose(out);
 
     /* Same run in the interpreter, so the fixture's own cycles are checked. */

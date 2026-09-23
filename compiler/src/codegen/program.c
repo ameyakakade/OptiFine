@@ -13,12 +13,13 @@
  * once (the winner is a shallow copy sharing its `instructions` pointer
  * with the original `candidates[]` slot select_min_energy pointed at, so
  * that slot must NOT also be freed separately). */
-static int emit_best(Candidate *candidates, size_t count, FILE *out, double *energy_acc, uint32_t *cycles_acc) {
+static int emit_best(Candidate *candidates, size_t count, EmitUnit *unit, FILE *out,
+                     double *energy_acc, uint32_t *cycles_acc) {
     const Candidate *best = select_min_energy(candidates, count);
     Candidate mutable_best = *best;
     locality_optimize(&mutable_best);
 
-    int rc = emit_candidate(&mutable_best, out);
+    int rc = emit_candidate(unit, &mutable_best, out);
     *energy_acc += mutable_best.energy_nj;
     *cycles_acc += mutable_best.cycles;
 
@@ -36,14 +37,14 @@ static int emit_best(Candidate *candidates, size_t count, FILE *out, double *ene
 static int lower_one(const IrGraph *graph, size_t op_id, const SramLayout *layout,
                       const RegAllocResult *regalloc, const CostModel *cost_model,
                       const int8_t *demo_input, size_t demo_input_len,
-                      int use_real_candidates, FILE *out,
+                      int use_real_candidates, EmitUnit *unit, FILE *out,
                       double *energy_acc, uint32_t *cycles_acc) {
     if (!use_real_candidates) {
         Candidate c;
         if (lower_op(graph, op_id, layout, regalloc, cost_model, demo_input, demo_input_len, &c) != 0) {
             return -1;
         }
-        return emit_best(&c, 1, out, energy_acc, cycles_acc);
+        return emit_best(&c, 1, unit, out, energy_acc, cycles_acc);
     }
 
     Candidate candidates[PROGRAM_MAX_CANDIDATES];
@@ -53,14 +54,14 @@ static int lower_one(const IrGraph *graph, size_t op_id, const SramLayout *layou
     if (count == 0) {
         return -1;
     }
-    return emit_best(candidates, count, out, energy_acc, cycles_acc);
+    return emit_best(candidates, count, unit, out, energy_acc, cycles_acc);
 }
 
 int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
                                 const RegAllocResult *regalloc, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
-                                FILE *out, ProgramRegionCost *out_cost) {
+                                EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
     out_cost->energy_nj = 0.0;
     out_cost->cycles = 0;
 
@@ -68,7 +69,7 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
     if (lower_init_zero_reg(cost_model, &zero_init) != 0) {
         return -1;
     }
-    if (emit_best(&zero_init, 1, out, &out_cost->energy_nj, &out_cost->cycles) != 0) {
+    if (emit_best(&zero_init, 1, unit, out, &out_cost->energy_nj, &out_cost->cycles) != 0) {
         return -1;
     }
 
@@ -76,7 +77,7 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
         int is_prologue = (graph->ops[i].kind == OP_INPUT || graph->ops[i].kind == OP_CONST);
         if (is_prologue) {
             if (lower_one(graph, i, layout, regalloc, cost_model, demo_input, demo_input_len,
-                          use_real_candidates, out,
+                          use_real_candidates, unit, out,
                           &out_cost->energy_nj, &out_cost->cycles) != 0) {
                 fprintf(stderr, "codegen_emit_initialization: failed to lower op %zu\n", i);
                 return -1;
@@ -90,7 +91,7 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
                                 const RegAllocResult *regalloc, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
-                                FILE *out, ProgramRegionCost *out_cost) {
+                                EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
     out_cost->energy_nj = 0.0;
     out_cost->cycles = 0;
 
@@ -103,7 +104,7 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
                 boundary_written = 1;
             }
             if (lower_one(graph, i, layout, regalloc, cost_model, demo_input, demo_input_len,
-                          use_real_candidates, out,
+                          use_real_candidates, unit, out,
                           &out_cost->energy_nj, &out_cost->cycles) != 0) {
                 fprintf(stderr, "codegen_emit_inference_body: failed to lower op %zu\n", i);
                 return -1;
@@ -127,15 +128,17 @@ int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
     ProgramRegionCost initialization = {0};
     ProgramRegionCost inference_body = {0};
 
+    EmitUnit unit;
+    emit_unit_init(&unit);
     emit_program_prologue(out);
     if (codegen_emit_initialization(graph, layout, regalloc, cost_model,
                                     demo_input, demo_input_len, use_real_candidates,
-                                    out, &initialization) != 0) {
+                                    &unit, out, &initialization) != 0) {
         return -1;
     }
     if (codegen_emit_inference_body(graph, layout, regalloc, cost_model,
                                     demo_input, demo_input_len, use_real_candidates,
-                                    out, &inference_body) != 0) {
+                                    &unit, out, &inference_body) != 0) {
         return -1;
     }
 

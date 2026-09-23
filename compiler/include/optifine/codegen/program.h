@@ -14,6 +14,7 @@
 #include "optifine/codegen/regalloc.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
+#include "optifine/emit.h"
 #include "optifine/ir.h"
 
 typedef struct {
@@ -35,16 +36,19 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
                                 const RegAllocResult *regalloc, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
-                                FILE *out, ProgramRegionCost *out_cost);
+                                EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost);
 
 /* Emits the reusable inference operations: every operation except OP_INPUT
  * and OP_CONST. It does not emit complete-program wrapper or termination
- * instructions. */
+ * instructions.
+ *
+ * Both take the EmitUnit of the .s file being written, so labels stay unique
+ * when a caller emits the two regions into one program (see emit.h). */
 int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
                                 const RegAllocResult *regalloc, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
-                                FILE *out, ProgramRegionCost *out_cost);
+                                EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost);
 
 /* Writes a complete AVR .s program for `graph` to `out`, wrapped with the
  * .arch/.section/_start:/break boilerplate. `demo_input`/`demo_input_len`

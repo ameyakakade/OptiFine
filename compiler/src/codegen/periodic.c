@@ -155,10 +155,13 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
         return -1;
     }
 
+    /* One .s file, so one label namespace across both emitted regions. */
+    EmitUnit unit;
+    emit_unit_init(&unit);
     if (codegen_emit_initialization(graph, layout, regalloc, cost_model,
                                     demo_input, demo_input_len,
                                     options->use_real_candidates,
-                                    out, &out_cost->initialization) != 0) {
+                                    &unit, out, &out_cost->initialization) != 0) {
         return -1;
     }
 
@@ -222,7 +225,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
     if (codegen_emit_inference_body(graph, layout, regalloc, cost_model,
                                     demo_input, demo_input_len,
                                     options->use_real_candidates,
-                                    out, &out_cost->inference) != 0) {
+                                    &unit, out, &out_cost->inference) != 0) {
         return -1;
     }
 

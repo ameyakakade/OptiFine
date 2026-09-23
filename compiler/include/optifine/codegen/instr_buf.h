@@ -89,6 +89,22 @@ void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx);
  * executed one cannot disagree. */
 void instrbuf_loop_begin_sram(InstrBuf *b, LoopCtx *ctx, uint32_t trip, uint16_t counter_addr);
 
+/* --- Candidate-local labels ---
+ *
+ * The labels instrbuf_loop_* generate (`.Ldsp<n>` heads, `.Lex<n>` exits) are
+ * numbered by loop region, so they are unique only within one Candidate. A
+ * program is several candidates concatenated, so the emitter (emit.h's
+ * EmitUnit) renumbers them past everything already emitted in the same
+ * assembly unit. Any other label -- `.Ltw`, the twiddle table -- is global to
+ * the unit and must be defined exactly once in it.
+ *
+ * avr_local_label_rebase: if `name` is a candidate-local label, writes it
+ * renumbered by `base` into `out` and returns 1; otherwise returns 0 and
+ * leaves `out` untouched. The index of a local label is its loop region, so
+ * `index + 1` over a candidate's labels is how many numbers it consumes. */
+int avr_local_label_index(const char *name, unsigned *index);
+int avr_local_label_rebase(const char *name, unsigned base, char *out);
+
 /* True for the label pseudo-instruction, which emits `name:` rather than an
  * opcode and costs nothing. */
 int avr_instr_is_label(const AvrInstr *instr);

@@ -99,12 +99,14 @@ static void assert_reusable_classifier_regions(const IrGraph *graph, const SramL
 
     ProgramRegionCost init = {0};
     ProgramRegionCost body = {0};
+    EmitUnit unit;
+    emit_unit_init(&unit);
     assert(codegen_emit_initialization(graph, layout, regalloc, cost_model,
                                        demo_input, demo_input_len, 1,
-                                       init_out, &init) == 0);
+                                       &unit, init_out, &init) == 0);
     assert(codegen_emit_inference_body(graph, layout, regalloc, cost_model,
                                        demo_input, demo_input_len, 1,
-                                       body_out, &body) == 0);
+                                       &unit, body_out, &body) == 0);
     assert(init.energy_nj > 0.0 && body.energy_nj > 0.0);
     assert(init.cycles > 0 && body.cycles > 0);
 

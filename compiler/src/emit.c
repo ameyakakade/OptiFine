@@ -1,5 +1,7 @@
 #include "optifine/emit.h"
 
+#include <string.h>
+
 #include "optifine/codegen/instr_buf.h"
 
 int emit_program_prologue(FILE *out) {
@@ -15,13 +17,46 @@ int emit_program_epilogue(FILE *out) {
     return 0;
 }
 
-int emit_candidate(const Candidate *candidate, FILE *out) {
+/* The operand as it must appear in this unit: local labels renumbered,
+ * everything else verbatim. */
+static const char *unit_operand(const EmitUnit *unit, const char *op, char *scratch) {
+    return avr_local_label_rebase(op, unit->next_local, scratch) ? scratch : op;
+}
+
+int emit_candidate(EmitUnit *unit, const Candidate *candidate, FILE *out) {
+    /* Numbers this candidate's local labels consume, and a duplicate check on
+     * its global ones, both before any text is written. */
+    unsigned span = 0;
+    for (size_t i = 0; i < candidate->num_instructions; i++) {
+        const AvrInstr *instr = &candidate->instructions[i];
+        if (!avr_instr_is_label(instr)) continue;
+        unsigned idx;
+        if (avr_local_label_index(instr->operands[0], &idx)) {
+            if (idx + 1 > span) span = idx + 1;
+            continue;
+        }
+        for (size_t g = 0; g < unit->num_globals; g++) {
+            if (strcmp(unit->globals[g], instr->operands[0]) == 0) {
+                fprintf(stderr, "emit: label '%s' is already defined in this assembly unit\n",
+                        instr->operands[0]);
+                return -1;
+            }
+        }
+        if (unit->num_globals == EMIT_UNIT_MAX_GLOBALS) {
+            fprintf(stderr, "emit: more than %d global labels in one assembly unit\n",
+                    EMIT_UNIT_MAX_GLOBALS);
+            return -1;
+        }
+        snprintf(unit->globals[unit->num_globals++], AVR_OPERAND_LEN, "%s", instr->operands[0]);
+    }
+
+    char scratch[AVR_OPERAND_LEN];
     for (size_t i = 0; i < candidate->num_instructions; i++) {
         const AvrInstr *instr = &candidate->instructions[i];
         /* Labels are directives, not instructions: emitted flush-left as
          * `name:` so the assembler binds them, with no operand list. */
         if (avr_instr_is_label(instr)) {
-            fprintf(out, "%s:\n", instr->operands[0]);
+            fprintf(out, "%s:\n", unit_operand(unit, instr->operands[0], scratch));
             continue;
         }
         if (avr_instr_is_data_word(instr)) {
@@ -30,9 +65,10 @@ int emit_candidate(const Candidate *candidate, FILE *out) {
         }
         fprintf(out, "    %s", instr->mnemonic);
         for (int j = 0; j < instr->num_operands; j++) {
-            fprintf(out, "%s%s", j == 0 ? " " : ", ", instr->operands[j]);
+            fprintf(out, "%s%s", j == 0 ? " " : ", ", unit_operand(unit, instr->operands[j], scratch));
         }
         fprintf(out, "\n");
     }
+    unit->next_local += span;
     return 0;
 }
