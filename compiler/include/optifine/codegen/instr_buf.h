@@ -17,6 +17,7 @@ typedef struct {
     size_t first;
     size_t last;
     uint32_t trip;
+    int is_long; /* closed as `breq exit / rjmp head` rather than `brne head` */
 } LoopRegion;
 
 #define INSTRBUF_MAX_LOOPS 32
@@ -34,7 +35,8 @@ typedef struct {
     size_t body_first;   /* index of the first body instruction */
     size_t region;       /* slot reserved in InstrBuf::loops */
     uint32_t trip;
-    int counter_reg;
+    int counter_reg;       /* -1 when the counter lives in SRAM */
+    uint16_t counter_addr; /* SRAM counter cell, meaningful only when counter_reg == -1 */
     char label[AVR_OPERAND_LEN];
 } LoopCtx;
 
@@ -76,6 +78,16 @@ void fmt_hi8(char *out, uint16_t addr);
  * and there is no branching of any other kind. */
 void instrbuf_loop_begin(InstrBuf *b, LoopCtx *ctx, uint32_t trip, int counter_reg);
 void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx);
+
+/* The same counted loop with its counter held in one SRAM byte instead of a
+ * register, for an outer loop whose body already owns every register -- the
+ * FFT's per-block loop around the butterfly loop, which holds
+ * REG_DSP_LOOP_COUNTER. Opens with `ldi r24, trip / sts cell, r24` and closes
+ * with `lds r24, cell / dec r24 / sts cell, r24` before the usual branch, so
+ * REG_SCRATCH0 must be dead at both ends (it is at every block boundary).
+ * The trip count is still the ldi immediate, so the priced trip and the
+ * executed one cannot disagree. */
+void instrbuf_loop_begin_sram(InstrBuf *b, LoopCtx *ctx, uint32_t trip, uint16_t counter_addr);
 
 /* True for the label pseudo-instruction, which emits `name:` rather than an
  * opcode and costs nothing. */

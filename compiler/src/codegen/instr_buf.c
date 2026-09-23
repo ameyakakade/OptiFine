@@ -100,18 +100,28 @@ void fmt_hi8(char *out, uint16_t addr) {
  * into another. Named after the loop's region index so a label in generated
  * assembly maps back to a region in the pricing table. */
 
-void instrbuf_loop_begin(InstrBuf *b, LoopCtx *ctx, uint32_t trip, int counter_reg) {
-    /* trip must fit the 8-bit counter register `dec`/`brne` drive, and a
-     * zero trip would wrap to 256 rather than skipping the body. Both are
-     * compile-time properties of this project's fixed-size DSP pipeline, so
-     * an assert is the right check: there is no runtime path that can reach
-     * it with a bad value. */
+static void loop_open(InstrBuf *b, LoopCtx *ctx, uint32_t trip) {
+    /* trip must fit the 8-bit counter `dec` drives, and a zero trip would
+     * wrap to 256 rather than skipping the body. Both are compile-time
+     * properties of this project's fixed-size DSP pipeline, so an assert is
+     * the right check: there is no runtime path that can reach it with a bad
+     * value. */
     assert(trip >= 1 && trip <= 256);
     assert(b->num_loops < INSTRBUF_MAX_LOOPS);
     ctx->trip = trip;
-    ctx->counter_reg = counter_reg;
     ctx->region = b->num_loops++;
     snprintf(ctx->label, AVR_OPERAND_LEN, ".Ldsp%zu", ctx->region);
+}
+
+static void loop_place_label(InstrBuf *b, LoopCtx *ctx) {
+    ins1(b, AVR_LABEL_MNEMONIC, ctx->label);
+    ctx->body_first = b->count;
+}
+
+void instrbuf_loop_begin(InstrBuf *b, LoopCtx *ctx, uint32_t trip, int counter_reg) {
+    loop_open(b, ctx, trip);
+    ctx->counter_reg = counter_reg;
+    ctx->counter_addr = 0;
 
     char r[AVR_OPERAND_LEN], imm[AVR_OPERAND_LEN];
     fmt_reg(r, counter_reg);
@@ -132,8 +142,21 @@ void instrbuf_loop_begin(InstrBuf *b, LoopCtx *ctx, uint32_t trip, int counter_r
         ins2(b, "ldi", t, imm);
         ins2(b, "mov", r, t);
     }
-    ins1(b, AVR_LABEL_MNEMONIC, ctx->label);
-    ctx->body_first = b->count;
+    loop_place_label(b, ctx);
+}
+
+void instrbuf_loop_begin_sram(InstrBuf *b, LoopCtx *ctx, uint32_t trip, uint16_t counter_addr) {
+    loop_open(b, ctx, trip);
+    ctx->counter_reg = -1;
+    ctx->counter_addr = counter_addr;
+
+    char t[AVR_OPERAND_LEN], imm[AVR_OPERAND_LEN], a[AVR_OPERAND_LEN];
+    fmt_reg(t, REG_SCRATCH0);
+    fmt_imm(imm, (uint8_t)(trip & 0xFF));
+    fmt_addr(a, counter_addr);
+    ins2(b, "ldi", t, imm);
+    ins2(b, "sts", a, t);
+    loop_place_label(b, ctx);
 }
 
 size_t avr_instr_flash_bytes(const AvrInstr *ins) {
@@ -155,15 +178,26 @@ size_t avr_instr_flash_bytes(const AvrInstr *ins) {
 
 void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx) {
     char r[AVR_OPERAND_LEN];
-    fmt_reg(r, ctx->counter_reg);
-    ins1(b, "dec", r);
+    if (ctx->counter_reg >= 0) {
+        fmt_reg(r, ctx->counter_reg);
+        ins1(b, "dec", r);
+    } else {
+        /* sts leaves SREG alone, so Z from the dec still decides the branch. */
+        char a[AVR_OPERAND_LEN];
+        fmt_reg(r, REG_SCRATCH0);
+        fmt_addr(a, ctx->counter_addr);
+        ins2(b, "lds", r, a);
+        ins1(b, "dec", r);
+        ins2(b, "sts", a, r);
+    }
 
     /* Distance from the branch back to the loop label, in words. */
     size_t bytes = 0;
     for (size_t i = ctx->body_first; i < b->count; i++) bytes += avr_instr_flash_bytes(&b->items[i]);
     size_t words = bytes / 2 + 1;
 
-    if (words <= AVR_BRNE_REACH_WORDS) {
+    int is_long = words > AVR_BRNE_REACH_WORDS;
+    if (!is_long) {
         ins1(b, "brne", ctx->label);
     } else {
         /* Invert: skip past an unconditional jump back to the head. */
@@ -177,6 +211,7 @@ void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx) {
     b->loops[ctx->region].first = ctx->body_first;
     b->loops[ctx->region].last = b->count - 1; /* includes dec + brne */
     b->loops[ctx->region].trip = ctx->trip;
+    b->loops[ctx->region].is_long = is_long;
 }
 
 int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
@@ -238,13 +273,14 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
                 outer *= buf->loops[o].trip;
             }
         }
-        int is_long = 0;
-        for (size_t i = buf->loops[l].first; i <= buf->loops[l].last; i++) {
-            if (!strcmp(buf->items[i].mnemonic, "rjmp")) { is_long = 1; break; }
-        }
+        /* The closing form is recorded when the loop is closed rather than
+         * inferred by scanning the region for an rjmp. An outer region
+         * contains its inner loops' rjmps, so a scan would be reading another
+         * loop's closure; it only gave the right answer because an outer body
+         * is always at least as long as the inner one it wraps. */
         uint32_t trip = buf->loops[l].trip;
         double give_back;
-        if (is_long) {
+        if (buf->loops[l].is_long) {
             /* breq not taken for trip-1 iterations: -1 cycle each.
              * rjmp skipped on the final iteration: -2 cycles once. */
             give_back = (double)(trip - 1) * 1.0 + 2.0;

@@ -2,7 +2,8 @@
  * compiler/src/codegen/lower.c emits: the 18 straight-line opcodes (ldi,
  * sts, lds, mov, clr, add, adc, sub, sbc, lsl, rol, com, and, asr, ror,
  * mul, muls, mulsu) plus the DSP path's counted-loop machinery (dec, brne,
- * ld, st, ldd, std, adiw, sbiw, movw and the .L label pseudo-instruction).
+ * ld, st, ldd, std, adiw, sbiw, movw, subi, sbci and the .L label
+ * pseudo-instruction).
  * This is NOT a general AVR simulator: it exists only to execute this
  * project's own generated code for golden-value correctness testing, and
  * must never be used as a substitute for Avrora's real energy numbers or
@@ -18,6 +19,14 @@
  * SRAM_LAYOUT_LIMIT allows (0x1100) -- addresses are used directly as
  * array indices, matching real AVR direct addressing. */
 #define AVR_INTERP_MEM_SIZE 0x1100
+
+/* Program-memory image size: the 64 KiB that plain LPM (Z only, no RAMPZ)
+ * can address, not the SRAM size. It was once AVR_INTERP_MEM_SIZE, and a
+ * program longer than 0x1100 bytes -- the six-stage FFT -- had its twiddle
+ * table silently left out of the image. Code or data past this bound is a
+ * hard error, since reaching it would need ELPM, which the project does not
+ * use. */
+#define AVR_INTERP_PROGMEM_SIZE 0x10000
 
 typedef struct {
     uint8_t regs[32];
@@ -39,7 +48,7 @@ typedef struct {
      * the compiler emitted resolves here to the same byte the real device
      * would read. Only `.dw` payload bytes are meaningful; opcode bytes are
      * left zero because nothing in this project reads its own code. */
-    uint8_t progmem[AVR_INTERP_MEM_SIZE];
+    uint8_t progmem[AVR_INTERP_PROGMEM_SIZE];
     size_t progmem_size;
 
     /* Cycles actually executed, accumulated from this interpreter's OWN cycle
@@ -49,6 +58,8 @@ typedef struct {
      * from cost_table.toml categories, the interpreter counts from the manual,
      * and Avrora measures. All three must agree. */
     unsigned long cycles;
+    /* Instructions actually executed (labels and data words excluded). */
+    unsigned long instructions;
 } AvrInterp;
 
 #define AVR_INTERP_DEFAULT_BUDGET 20000000UL

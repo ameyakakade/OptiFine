@@ -73,6 +73,13 @@ static const CategoryEntry kCategories[] = {
     {"cpc",  "SUB"},
     {"lsr",  "SUB"},
     {"eor",  "ADD"},
+
+    /* Immediate subtract, low byte then with borrow: the 16-bit pointer step
+     * the FFT needs between a butterfly's p and q elements, which are up to
+     * 128 bytes apart -- beyond ADIW/SBIW's 0..63. Both are 1-cycle ALU ops,
+     * the same family as SUB/SBC. */
+    {"subi", "SUB"},
+    {"sbci", "SUB"},
 };
 
 /* Opcodes whose cycle count no cost_table.toml category expresses.

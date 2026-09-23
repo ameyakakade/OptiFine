@@ -27,6 +27,7 @@ void avr_interp_init(AvrInterp *interp) {
     memset(interp->progmem, 0, sizeof(interp->progmem));
     interp->progmem_size = 0;
     interp->cycles = 0;
+    interp->instructions = 0;
 }
 
 /* X/Y/Z are register pairs r26:r27, r28:r29, r30:r31. */
@@ -40,20 +41,25 @@ static size_t instr_flash_bytes(const AvrInstr *ins) {
 /* Lays the candidate out at its real flash addresses and fills in the .dw
  * payload, so `lpm` reads what the linked image would hold. Labels record
  * their byte address for lo8/hi8 resolution. */
-static void build_progmem(AvrInterp *interp, const Candidate *c) {
+static int build_progmem(AvrInterp *interp, const Candidate *c) {
     size_t addr = 0;
     for (size_t i = 0; i < c->num_instructions; i++) {
         const AvrInstr *ins = &c->instructions[i];
+        size_t size = instr_flash_bytes(ins);
+        if (addr + size > AVR_INTERP_PROGMEM_SIZE) {
+            fprintf(stderr, "avr_interp: program image exceeds the %u-byte LPM range at index %zu\n",
+                    (unsigned)AVR_INTERP_PROGMEM_SIZE, i);
+            return -1;
+        }
         if (avr_instr_is_data_word(ins)) {
             uint32_t w = (uint32_t)strtoul(ins->operands[0], NULL, 16);
-            if (addr + 1 < AVR_INTERP_MEM_SIZE) {
-                interp->progmem[addr] = (uint8_t)(w & 0xFF);       /* little-endian */
-                interp->progmem[addr + 1] = (uint8_t)((w >> 8) & 0xFF);
-            }
+            interp->progmem[addr] = (uint8_t)(w & 0xFF);       /* little-endian */
+            interp->progmem[addr + 1] = (uint8_t)((w >> 8) & 0xFF);
         }
-        addr += instr_flash_bytes(ins);
+        addr += size;
     }
     interp->progmem_size = addr;
+    return 0;
 }
 
 /* Byte address of a label in the laid-out image. */
@@ -266,8 +272,9 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
             return -1;
         }
         uint16_t addr = (uint16_t)(ptr_get(interp, base) + disp);
-        if (addr >= AVR_INTERP_MEM_SIZE) {
-            fprintf(stderr, "avr_interp: lpm address 0x%X out of range\n", addr);
+        if (addr >= interp->progmem_size) {
+            fprintf(stderr, "avr_interp: lpm address 0x%X is past the program image (0x%zX bytes)\n",
+                    addr, interp->progmem_size);
             return -1;
         }
         r[reg_of(instr->operands[0])] = interp->progmem[addr];
@@ -284,6 +291,21 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         uint8_t z = ((result & 0xFF) == 0);
         interp->zero = (m[2] == 'c') ? (uint8_t)(interp->zero && z) : z;
         return 0; /* neither writes a register */
+    }
+    if (strcmp(m, "subi") == 0 || strcmp(m, "sbci") == 0) {
+        int rd = reg_of(instr->operands[0]);
+        if (rd < 16) {
+            fprintf(stderr, "avr_interp: %s only encodes r16-r31, got r%d\n", m, rd);
+            return -1;
+        }
+        int with_carry = (m[1] == 'b');
+        int result = (int)r[rd] - (int)hex_of(instr->operands[1]) - (with_carry ? interp->carry : 0);
+        interp->carry = (result < 0) ? 1 : 0;
+        r[rd] = (uint8_t)(result & 0xFF);
+        /* SBCI keeps Z only if it was already set, same chaining as CPC. */
+        uint8_t z = (r[rd] == 0);
+        interp->zero = with_carry ? (uint8_t)(interp->zero && z) : z;
+        return 0;
     }
     if (strcmp(m, "lsr") == 0) {
         int rd = reg_of(instr->operands[0]);
@@ -392,7 +414,9 @@ static int resolve_symbolic(const Candidate *c, const char *op, uint8_t *out) {
 
 int avr_interp_run(AvrInterp *interp, const Candidate *candidate) {
     size_t pc = 0;
-    build_progmem(interp, candidate);
+    if (build_progmem(interp, candidate) != 0) {
+        return -1;
+    }
     while (pc < candidate->num_instructions) {
         if (interp->budget-- == 0) {
             fprintf(stderr, "avr_interp: instruction budget exhausted -- runaway loop?\n");
@@ -416,11 +440,13 @@ int avr_interp_run(AvrInterp *interp, const Candidate *candidate) {
             }
             interp->regs[reg_of(ins->operands[0])] = v;
             interp->cycles += avr_interp_cycles(ins, 0);
+            interp->instructions++;
             pc++;
             continue;
         }
         if (strcmp(ins->mnemonic, "break") == 0) {
             interp->cycles += avr_interp_cycles(ins, 0);
+            interp->instructions++;
             return 0; /* halts, exactly as Avrora does; anything after is data */
         }
         if (avr_interp_step(interp, ins) != 0) {
@@ -431,6 +457,7 @@ int avr_interp_run(AvrInterp *interp, const Candidate *candidate) {
         int is_rjmp = !strcmp(ins->mnemonic, "rjmp");
         int take = is_rjmp || (is_brne && !interp->zero) || (is_breq && interp->zero);
         interp->cycles += avr_interp_cycles(ins, (is_brne || is_breq) ? take : 0);
+        if (!avr_instr_is_label(ins)) interp->instructions++;
         if ((is_brne || is_breq || is_rjmp) && take) {
             long target = find_label(candidate, ins->operands[0]);
             if (target < 0) {

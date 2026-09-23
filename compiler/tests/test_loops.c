@@ -222,10 +222,12 @@ static void twiddle_q15(int k, int16_t *wr, int16_t *wi) {
 }
 
 /* Emits: load entry k into r16..r19, halt, then the table. */
-static void build_twiddle_probe(InstrBuf *b, int k) {
+static void build_twiddle_probe_padded(InstrBuf *b, int k, int pad_words) {
     char zl[AVR_OPERAND_LEN], zh[AVR_OPERAND_LEN], zp[AVR_OPERAND_LEN], reg[AVR_OPERAND_LEN];
     char sym[AVR_OPERAND_LEN];
     fmt_reg(zl, 30); fmt_reg(zh, 31); fmt_ptr(zp, 'Z', 1);
+    fmt_reg(reg, REG_SCRATCH1);
+    for (int i = 0; i < pad_words; i++) ins2(b, "mov", reg, reg); /* pushes the table up in flash */
     fmt_lo8_sym(sym, TW_LABEL, k * 4); ins2(b, "ldi", zl, sym);
     fmt_hi8_sym(sym, TW_LABEL, k * 4); ins2(b, "ldi", zh, sym);
     for (int i = 0; i < 4; i++) { fmt_reg(reg, 16 + i); ins2(b, "lpm", reg, zp); }
@@ -243,6 +245,8 @@ static void build_twiddle_probe(InstrBuf *b, int k) {
         ins_data_word(b, (uint16_t)wi);
     }
 }
+
+static void build_twiddle_probe(InstrBuf *b, int k) { build_twiddle_probe_padded(b, k, 0); }
 
 static void test_lpm_reads_canonical_twiddles(void) {
     CostModel cm; load_costs(&cm);
@@ -318,6 +322,85 @@ static void test_lpm_is_priced_at_three_cycles(void) {
     candidate_free(&c);
 }
 
+/* Regression: the interpreter's program image used to be sized like SRAM
+ * (0x1100 bytes) and silently skipped any .dw beyond it, so the six-stage
+ * FFT -- over 4 KB of code before its table -- read the wrong bytes. Here the
+ * table sits past 0x1100 and must still read back exactly. */
+static void test_lpm_reads_a_table_beyond_0x1100(void) {
+    CostModel cm; load_costs(&cm);
+    InstrBuf b; instrbuf_init(&b);
+    build_twiddle_probe_padded(&b, 31, 0x1200 / 2);
+    Candidate c; assert(instrbuf_price(&b, &cm, &c) == 0);
+    AvrInterp *in = malloc(sizeof(AvrInterp));
+    avr_interp_init(in);
+    assert(avr_interp_run(in, &c) == 0);
+    int16_t wr_exp, wi_exp; twiddle_q15(31, &wr_exp, &wi_exp);
+    int16_t wr = (int16_t)((uint16_t)in->mem[0x0300] | ((uint16_t)in->mem[0x0301] << 8));
+    int16_t wi = (int16_t)((uint16_t)in->mem[0x0302] | ((uint16_t)in->mem[0x0303] << 8));
+    printf("  lpm past 0x1100 (image 0x%zX B): k=31 -> %d %d (expect %d %d)\n",
+           in->progmem_size, wr, wi, wr_exp, wi_exp);
+    assert(in->progmem_size > 0x1100);
+    assert(wr == wr_exp && wi == wi_exp);
+    free(in);
+    candidate_free(&c);
+}
+
+/* An SRAM-held counter, as the FFT's block loop uses: 8 outer x 4 inner with
+ * the inner counter in a register. Cycles derived by hand from the AVR
+ * Instruction Set Manual:
+ *   outer init        ldi 1 + sts 2                               3
+ *   per outer iter    inner (ldi 1 + 4x(6+1) + 3x2 + 1 = 36)
+ *                     + lds 2 + dec 1 + sts 2                    41
+ *   outer brne        taken 7 x 2, falls through once x 1        15
+ * total 3 + 8*41 + 15 = 346. */
+static void test_sram_counter_nested_loop(void) {
+    CostModel cm; load_costs(&cm);
+    InstrBuf b; instrbuf_init(&b);
+    LoopCtx outer, inner;
+    instrbuf_loop_begin_sram(&b, &outer, 8, 0x0400);
+    instrbuf_loop_begin(&b, &inner, 4, COUNTER);
+    emit_increment(&b, 0x0300);
+    instrbuf_loop_end(&b, &inner);
+    instrbuf_loop_end(&b, &outer);
+    assert(!b.loops[outer.region].is_long && !b.loops[inner.region].is_long);
+    Candidate c; assert(instrbuf_price(&b, &cm, &c) == 0);
+    AvrInterp in; avr_interp_init(&in);
+    assert(avr_interp_run(&in, &c) == 0);
+    printf("  sram-counter 8x4: mem=%u (expect 32), counter cell=%u, cycles %u predicted, %lu run, 346 by hand\n",
+           in.mem[0x0300], in.mem[0x0400], c.cycles, in.cycles);
+    assert(in.mem[0x0300] == 32);
+    assert(in.mem[0x0400] == 0);
+    assert(c.cycles == 346 && in.cycles == 346);
+    candidate_free(&c);
+}
+
+/* Closure forms are recorded per loop: here the outer loop is long (padded
+ * past BRNE's reach) while the inner one stays short. By hand:
+ *   outer init 3; per outer iter 36 (inner) + 70 (pad) + 5 (lds/dec/sts) = 111;
+ *   outer close: breq not taken + rjmp (1 + 2) twice, breq taken (2) once.
+ * total 3 + 3*111 + 2*3 + 2 = 344. */
+static void test_long_outer_around_short_inner(void) {
+    CostModel cm; load_costs(&cm);
+    InstrBuf b; instrbuf_init(&b);
+    LoopCtx outer, inner;
+    char pad[AVR_OPERAND_LEN]; fmt_reg(pad, REG_SCRATCH1);
+    instrbuf_loop_begin_sram(&b, &outer, 3, 0x0400);
+    instrbuf_loop_begin(&b, &inner, 4, COUNTER);
+    emit_increment(&b, 0x0300);
+    instrbuf_loop_end(&b, &inner);
+    for (int i = 0; i < 70; i++) ins2(&b, "mov", pad, pad);
+    instrbuf_loop_end(&b, &outer);
+    assert(b.loops[outer.region].is_long && !b.loops[inner.region].is_long);
+    Candidate c; assert(instrbuf_price(&b, &cm, &c) == 0);
+    AvrInterp in; avr_interp_init(&in);
+    assert(avr_interp_run(&in, &c) == 0);
+    printf("  long outer / short inner 3x4: mem=%u, cycles %u predicted, %lu run, 344 by hand\n",
+           in.mem[0x0300], c.cycles, in.cycles);
+    assert(in.mem[0x0300] == 12);
+    assert(c.cycles == 344 && in.cycles == 344);
+    candidate_free(&c);
+}
+
 int main(void) {
     test_loop_executes_body_trip_times();
     test_loop_emits_far_less_than_unrolling();
@@ -330,6 +413,9 @@ int main(void) {
     test_twiddle_table_is_below_the_lpm_64k_boundary();
     test_table_cannot_be_reached_by_fall_through();
     test_lpm_is_priced_at_three_cycles();
+    test_lpm_reads_a_table_beyond_0x1100();
+    test_sram_counter_nested_loop();
+    test_long_outer_around_short_inner();
     printf("test_loops: all tests passed\n");
     return 0;
 }
