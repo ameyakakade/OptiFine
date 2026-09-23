@@ -68,6 +68,7 @@ add_executable(test_lower test_lower.c
     ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
     ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
     ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/dsp32.c
     ${CMAKE_SOURCE_DIR}/src/codegen/regalloc.c
     ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
     ${CMAKE_SOURCE_DIR}/src/codegen/select.c
@@ -98,6 +99,7 @@ add_executable(test_dsp_lower test_dsp_lower.c
     ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
     ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
     ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/dsp32.c
     ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
     ${CMAKE_SOURCE_DIR}/src/codegen/regalloc.c
 )
@@ -148,6 +150,7 @@ add_executable(test_loops test_loops.c
     ${CMAKE_SOURCE_DIR}/src/ir.c
     ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
     ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/dsp32.c
     ${CMAKE_SOURCE_DIR}/src/dsp_build.c
     ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
     ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
@@ -280,4 +283,53 @@ if(UNIX)
     target_link_libraries(test_asm_unit PRIVATE m)
 endif()
 add_test(NAME test_asm_unit COMMAND test_asm_unit
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)
+
+add_executable(test_dsp_isqrt test_dsp_isqrt.c
+    avr_interp.c
+    ${CMAKE_SOURCE_DIR}/src/cost_model.c
+    ${CMAKE_SOURCE_DIR}/src/emit.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/dsp32.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
+    ${CMAKE_SOURCE_DIR}/src/ir.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/dsp_build.c
+)
+target_include_directories(test_dsp_isqrt PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_dsp_isqrt PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    target_link_libraries(test_dsp_isqrt PRIVATE m)
+endif()
+add_test(NAME test_dsp_isqrt COMMAND test_dsp_isqrt
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)
+
+add_executable(test_dsp_magnitude test_dsp_magnitude.c
+    avr_interp.c
+    ${CMAKE_SOURCE_DIR}/src/ir.c
+    ${CMAKE_SOURCE_DIR}/src/dsp_build.c
+    ${CMAKE_SOURCE_DIR}/src/cost_model.c
+    ${CMAKE_SOURCE_DIR}/src/emit.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/dsp32.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/regalloc.c
+)
+target_include_directories(test_dsp_magnitude PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_dsp_magnitude PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    target_link_libraries(test_dsp_magnitude PRIVATE m)
+endif()
+add_test(NAME test_dsp_magnitude COMMAND test_dsp_magnitude
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)

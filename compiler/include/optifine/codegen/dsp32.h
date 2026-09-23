@@ -58,6 +58,46 @@ void dsp32_cmp(InstrBuf *b, int a, int b_quad);
  * Clobbers: dst, r0, r1, and REG_DSP_SIGNEXT. */
 void dsp32_mul16x16(InstrBuf *b, int dst, int xlo, int xhi, int ylo, int yhi);
 
+/* dst = src, as two movw. Both quads must start on an even register. */
+void dsp32_mov(InstrBuf *b, int dst, int src);
+
+/* quad = value. Bytes that are zero become clr; the rest are staged through
+ * `scratch_reg` (r16-r31, since ldi cannot target r0-r15) unless the byte's
+ * own register can take ldi directly. Clobbers: quad, scratch_reg. */
+void dsp32_load_imm(InstrBuf *b, int quad, uint32_t value, int scratch_reg);
+
+/* quad &= mask, the same mask byte applied to all four bytes. With a mask of
+ * 0x00 or 0xFF this is a branch-free select between the value and zero. */
+void dsp32_and_mask(InstrBuf *b, int quad, int mask_reg);
+
+/* Immediately after dsp32_cmp(a, b): mask_reg = 0xFF if a >= b (unsigned),
+ * else 0x00. `sbc m,m` turns the compare's borrow into a whole byte and `com`
+ * inverts it. Consumes exactly the carry dsp32_cmp just produced, so it must
+ * follow it with nothing in between. Clobbers: mask_reg. */
+void dsp8_ge_mask(InstrBuf *b, int mask_reg);
+
+/* res = floor(sqrt(num)), unsigned 32-bit num, exact over all of uint32.
+ *
+ * Bit-by-bit restoring square root with a FIXED 16 iterations (one per result
+ * bit), as a counted loop on `counter_reg`:
+ *
+ *     res = 0; bit = 1 << 30
+ *     repeat 16:
+ *         t = res + bit
+ *         keep = (num >= t)                 -- mask, no branch
+ *         num -= t & keep
+ *         res = (res >> 1) + (bit & keep)
+ *         bit >>= 2
+ *
+ * Every data decision is a mask, so the executed path -- and the cycle count
+ * -- is identical for every input; the only branch is the loop's own.
+ *
+ * `num`, `res`, `bit` and `tmp` are four distinct movw-aligned quads.
+ * Clobbers: all four (num ends as the remainder, bit as 0), mask_reg,
+ * counter_reg, and REG_SCRATCH0 (trip-count staging when counter_reg < 16).
+ * Reads no incoming flag. */
+void dsp32_isqrt(InstrBuf *b, int num, int res, int bit, int tmp, int mask_reg, int counter_reg);
+
 /* SRAM <-> quad, absolute addressing. */
 void dsp32_load(InstrBuf *b, int quad, uint16_t addr);
 void dsp32_store(InstrBuf *b, int quad, uint16_t addr);

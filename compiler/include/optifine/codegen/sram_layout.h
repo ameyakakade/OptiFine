@@ -20,21 +20,33 @@
  * upper bound of the valid address range). */
 #define SRAM_LAYOUT_LIMIT 0x1100
 
-/* Fixed-size scratch region the DSP path's lower.c helpers use for
- * multiply/compare/select intermediates (see lower.c's DSP scratch cell
- * table, offsets 0-179) -- 4 partial products + 1 unused 2-byte gap
- * (a leftover offset boundary from an earlier draft, harmless) + 2
- * complex-combine temporaries + 2 staged twiddle constants + 1
- * always-zero cell + 8 integer-sqrt working cells + 2 equality-mask
- * temporaries + 1 masked-select scratch + a 64-element magnitude
- * working copy for PeakExtract + 5 peak-selection cells (best,
- * best_idx, cand_idx, mask, select_tmp), all 2 bytes wide:
- * (4+1+2+2+1+8+2+1+64+5)*2 = 180 -- plus one byte appended after that map
- * for the FFT's per-block loop counter (DSP_SCRATCH_FFT_OUTER_COUNT), 181.
+/* DSP scratch arena: DSP_SCRATCH_BYTES bytes placed after every op's tensor,
+ * for the DSP ops' own temporaries.
  *
- * The FFT butterfly's own cells (lower.c's BF_*, offsets 0-25) are only live
- * inside one OP_FFT_BUTTERFLY and are dead before any later op runs. */
+ * It is an OVERLAY, not a partition. The program runs the graph's ops once
+ * each, in op-id order, every op's code a single-entry/single-exit region
+ * emitted after the previous one's (codegen/program.c), so no two op
+ * lifetimes overlap. Any op may therefore use any arena cell, provided it
+ * reads a cell only after writing it itself: then no value crosses an op
+ * boundary through scratch, and results cross only through graph tensors.
+ * test_asm_unit checks that rule over every lowered DSP op's code, and that no
+ * data pointer is aimed into the arena. Ranges of different ops may alias;
+ * the arena must cover the largest single op's extent, never the sum.
+ *
+ * Ownership, as offsets into the arena:
+ *   OP_FFT_BUTTERFLY  0-25  butterfly temporaries (lower.c BF_*)
+ *                     180   block counter        (DSP_SCRATCH_FFT_OUTER_COUNT)
+ *   OP_MAGNITUDE      0     element counter      (DSP_SCRATCH_MAG_COUNT),
+ *                           aliasing BF_AC across the op boundary
+ *   OP_PEAK_EXTRACT   not implemented; the milestone plan's layout reaches 179
+ *   Window, BitReverse, Input, Const, Output: none
+ *
+ * 181 is the FFT's extent: its block counter was put at 180, past the old
+ * plan's map, before this lifetime rule was written down. It stays there so
+ * the FFT's code and fixtures are unchanged; the most any op touches at once
+ * is 27 bytes (the FFT's 26 cells plus its counter). */
 #define DSP_SCRATCH_FFT_OUTER_COUNT 180 /* 1 byte: remaining blocks in one FFT stage */
+#define DSP_SCRATCH_MAG_COUNT 0         /* 1 byte: remaining bins in OP_MAGNITUDE */
 #define DSP_SCRATCH_BYTES 181
 
 typedef struct {

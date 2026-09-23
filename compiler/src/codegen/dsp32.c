@@ -1,5 +1,7 @@
 #include "optifine/codegen/dsp32.h"
 
+#include <assert.h>
+
 #include "optifine/codegen/registers.h"
 
 static void reg(char *out, int r) { fmt_reg(out, r); }
@@ -109,6 +111,63 @@ void dsp32_mul16x16(InstrBuf *b, int dst, int xlo, int xhi, int ylo, int yhi) {
     ins2(b, "add", d1, r0);
     ins2(b, "adc", d2, r1);
     ins2(b, "adc", d3, sg);
+}
+
+void dsp32_mov(InstrBuf *b, int dst, int src) {
+    assert(dst % 2 == 0 && src % 2 == 0);
+    char d[AVR_OPERAND_LEN], s[AVR_OPERAND_LEN];
+    reg(d, dst);     reg(s, src);     ins2(b, "movw", d, s);
+    reg(d, dst + 2); reg(s, src + 2); ins2(b, "movw", d, s);
+}
+
+void dsp32_load_imm(InstrBuf *b, int quad, uint32_t value, int scratch_reg) {
+    assert(scratch_reg >= 16);
+    char d[AVR_OPERAND_LEN], t[AVR_OPERAND_LEN], imm[AVR_OPERAND_LEN];
+    reg(t, scratch_reg);
+    for (int i = 0; i < DSP32_BYTES; i++) {
+        uint8_t v = (uint8_t)(value >> (8 * i));
+        reg(d, quad + i);
+        if (v == 0) { ins1(b, "clr", d); continue; }
+        fmt_imm(imm, v);
+        if (quad + i >= 16) { ins2(b, "ldi", d, imm); continue; }
+        ins2(b, "ldi", t, imm);
+        ins2(b, "mov", d, t);
+    }
+}
+
+void dsp32_and_mask(InstrBuf *b, int quad, int mask_reg) {
+    char d[AVR_OPERAND_LEN], m[AVR_OPERAND_LEN];
+    reg(m, mask_reg);
+    for (int i = 0; i < DSP32_BYTES; i++) { reg(d, quad + i); ins2(b, "and", d, m); }
+}
+
+void dsp8_ge_mask(InstrBuf *b, int mask_reg) {
+    char m[AVR_OPERAND_LEN];
+    reg(m, mask_reg);
+    ins2(b, "sbc", m, m); /* 0xFF if a < b (borrow), 0x00 otherwise */
+    ins1(b, "com", m);    /* 0xFF if a >= b */
+}
+
+void dsp32_isqrt(InstrBuf *b, int num, int res, int bit, int tmp, int mask_reg, int counter_reg) {
+    assert(num != res && num != bit && num != tmp && res != bit && res != tmp && bit != tmp);
+    dsp32_clear(b, res);
+    dsp32_load_imm(b, bit, 1u << 30, mask_reg);
+
+    LoopCtx loop;
+    instrbuf_loop_begin(b, &loop, 16, counter_reg);
+    dsp32_mov(b, tmp, res);
+    dsp32_add(b, tmp, bit);          /* t = res + bit; never carries out: res + bit < 2^32 */
+    dsp32_cmp(b, num, tmp);
+    dsp8_ge_mask(b, mask_reg);       /* keep = num >= t */
+    dsp32_and_mask(b, tmp, mask_reg);
+    dsp32_sub(b, num, tmp);          /* num -= t & keep */
+    dsp32_lsr(b, res);
+    dsp32_mov(b, tmp, bit);
+    dsp32_and_mask(b, tmp, mask_reg);
+    dsp32_add(b, res, tmp);          /* res = (res >> 1) + (bit & keep) */
+    dsp32_lsr(b, bit);
+    dsp32_lsr(b, bit);               /* bit >>= 2 */
+    instrbuf_loop_end(b, &loop);
 }
 
 void dsp32_load(InstrBuf *b, int quad, uint16_t addr) {

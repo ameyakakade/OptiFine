@@ -1,5 +1,5 @@
 /* One assembly unit built from several loop-generating DSP ops (the six FFT
- * stages), each lowered
+ * stages and Magnitude, which nests isqrt's loop inside its own), each lowered
  * through the real lower_op path and therefore each numbering its own loops
  * from .Ldsp0. Before EmitUnit, concatenating them produced duplicate labels
  * that avr-as rejects; this pins that every label in the unit is defined
@@ -48,10 +48,10 @@ static void build_unit(Unit *u) {
     u->cycles = 0;
     for (size_t i = 0; i < g.count; i++) {
         OpKind k = g.ops[i].kind;
-        if (k != OP_FFT_BUTTERFLY) continue;
+        if (k != OP_FFT_BUTTERFLY && k != OP_MAGNITUDE) continue;
         assert(u->count < MAX_PARTS);
         assert(lower_op(&g, i, &l, &ra, &g_cm, NULL, 0, &u->parts[u->count]) == 0);
-        u->names[u->count] = "fft stage";
+        u->names[u->count] = k == OP_FFT_BUTTERFLY ? "fft stage" : "magnitude";
         u->cycles += u->parts[u->count].cycles;
         u->count++;
     }
@@ -192,12 +192,73 @@ static void test_pricing_unaffected(void) {
     free_unit(&b);
 }
 
+/* The scratch lifetime rule (sram_layout.h): every DSP op reads a scratch
+ * cell only after writing it in its own code, so nothing crosses an op
+ * boundary through scratch and different ops' cells may alias. Program order
+ * is first-iteration order for these single-entry loops, so a read with no
+ * earlier write in the candidate is a read of another op's leftover. Data
+ * pointers (X/Y/Z loaded with ldi pairs) must never aim into the arena. */
+static void test_scratch_is_op_local(void) {
+    IrGraph g;
+    assert(dsp_build_pipeline(&g) == 0);
+    SramLayout l;
+    assert(sram_layout_build(&g, &l) == 0);
+    RegAllocResult ra;
+    assert(regalloc_next_use(&g, &ra) == 0);
+    uint32_t lo = l.dsp_scratch_addr, hi = lo + DSP_SCRATCH_BYTES;
+    int ops = 0;
+    for (size_t i = 0; i < g.count; i++) {
+        OpKind k = g.ops[i].kind;
+        if (k != OP_WINDOW && k != OP_BIT_REVERSE && k != OP_FFT_BUTTERFLY && k != OP_MAGNITUDE) continue;
+        Candidate c;
+        assert(lower_op(&g, i, &l, &ra, &g_cm, NULL, 0, &c) == 0);
+        static uint8_t written[AVR_OPERAND_LEN * 64];
+        memset(written, 0, sizeof(written));
+        int touched = 0, ptr_lo[32];
+        for (int r = 0; r < 32; r++) ptr_lo[r] = -1;
+        for (size_t j = 0; j < c.num_instructions; j++) {
+            const AvrInstr *ins = &c.instructions[j];
+            if (!strcmp(ins->mnemonic, "sts") || !strcmp(ins->mnemonic, "lds")) {
+                int is_st = ins->mnemonic[0] == 's';
+                uint32_t a = (uint32_t)strtoul(ins->operands[is_st ? 0 : 1], NULL, 16);
+                if (a < lo || a >= hi) continue;
+                assert(a - lo < sizeof(written));
+                if (is_st) { if (!written[a - lo]) touched++; written[a - lo] = 1; }
+                else if (!written[a - lo]) {
+                    printf("  op %zu reads scratch+%u before writing it\n", i, a - lo);
+                    assert(0);
+                }
+            }
+            if (!strcmp(ins->mnemonic, "ldi") && ins->operands[1][0] == '0') {
+                int r = atoi(ins->operands[0] + 1);
+                int v = (int)strtol(ins->operands[1], NULL, 16);
+                if (r == 26 || r == 28 || r == 30) ptr_lo[r] = v;
+                if ((r == 27 || r == 29 || r == 31) && ptr_lo[r - 1] >= 0) {
+                    uint32_t a = (uint32_t)(ptr_lo[r - 1] | (v << 8));
+                    assert(a < lo || a >= hi);
+                    ptr_lo[r - 1] = -1;
+                }
+            }
+        }
+        printf("  op %2zu (%s): %d scratch bytes, each written before read\n", i,
+               k == OP_WINDOW ? "window" : k == OP_BIT_REVERSE ? "bitreverse"
+               : k == OP_FFT_BUTTERFLY ? "fft stage" : "magnitude", touched);
+        candidate_free(&c);
+        ops++;
+    }
+    assert(ops == 9);
+    regalloc_result_free(&ra);
+    sram_layout_free(&l);
+    ir_graph_free(&g);
+}
+
 int main(int argc, char **argv) {
     const char *p = getenv("OPTIFINE_COST_TABLE");
     assert(cost_model_load(p ? p : "cost_table.toml", &g_cm) == 0);
     test_unit_labels_are_unique();
     test_global_label_defined_once();
     test_pricing_unaffected();
+    test_scratch_is_op_local();
 
     if (argc == 3 && (!strcmp(argv[1], "--emit-fixture") || !strcmp(argv[1], "--emit-naive"))) {
         Unit u;

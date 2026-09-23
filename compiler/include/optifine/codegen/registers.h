@@ -88,6 +88,10 @@ extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
  *                 declares it clobbers C may overwrite it freely.
  *   r16 - r19     16-bit operand window (REG_DSP_OP_*). muls/mulsu require
  *                 r16-r23, so the 16x16->32 multiply's inputs live here.
+ *                 Also DSP32_T, a fourth quad, but ONLY while no multiply
+ *                 operand is live: dsp32_isqrt uses it as its t = res + bit
+ *                 temporary, and it performs no multiply. Magnitude's squares
+ *                 have consumed r16-r19 before isqrt starts.
  *   r20 - r23     multiply partial-product scratch (REG_DSP_ACC_P*,
  *                 REG_DSP_SIGNEXT). Clobbered by dsp32_mul16x16.
  *   r24, r25      REG_SCRATCH0/1, byte scratch.
@@ -110,6 +114,11 @@ extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
 #define DSP32_A 4
 #define DSP32_B 8
 #define DSP32_C 12
+#define DSP32_T 16  /* aliases REG_DSP_OP_A_LO..REG_DSP_OP_B_HI -- see above */
 #define DSP32_BYTES 4
+/* dsp32_isqrt's keep/discard mask byte. REG_SCRATCH1 rather than
+ * REG_SCRATCH0, so it never meets the loop machinery's trip-count staging or
+ * the SRAM outer-counter close, both of which go through REG_SCRATCH0. */
+#define REG_DSP_MASK 25
 
 #endif /* OPTIFINE_CODEGEN_REGISTERS_H */

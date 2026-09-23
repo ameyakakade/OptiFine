@@ -457,6 +457,54 @@ static void test_register_footprints(void) {
     printf("  quads A/B/C are disjoint, movw-aligned, and clear of r16-r31\n");
 }
 
+/* The four helpers dsp32_isqrt is built from, each against its own oracle. */
+static void test_isqrt_building_blocks(void) {
+    size_t n = 0;
+    for (size_t i = 0; i < CORPUS_N + 64; i++) {
+        uint32_t a = i < CORPUS_N ? kCorpus32[i] : rng();
+        for (size_t j = 0; j < CORPUS_N + 8; j++, n++) {
+            uint32_t bv = j < CORPUS_N ? kCorpus32[j] : rng();
+
+            InstrBuf b1; instrbuf_init(&b1);           /* mov via movw */
+            dsp32_load(&b1, DSP32_A, A_ADDR);
+            dsp32_mov(&b1, DSP32_C, DSP32_A);
+            dsp32_store(&b1, DSP32_C, R_ADDR);
+            assert(run(&b1, a, bv, NULL) == a);
+
+            InstrBuf b2; instrbuf_init(&b2);           /* immediate load into a low quad */
+            dsp32_load_imm(&b2, DSP32_B, a, REG_SCRATCH0);
+            dsp32_store(&b2, DSP32_B, R_ADDR);
+            assert(run(&b2, 0, 0, NULL) == a);
+
+            /* ge mask after cmp, then and-select: (a >= b) ? a : 0 */
+            InstrBuf b3; instrbuf_init(&b3);
+            set_carry_via_mul(&b3, (uint8_t)(n & 1 ? 0xFF : 0x01));   /* incoming C must not matter */
+            dsp32_load(&b3, DSP32_A, A_ADDR);
+            dsp32_load(&b3, DSP32_B, B_ADDR);
+            dsp32_cmp(&b3, DSP32_A, DSP32_B);
+            dsp8_ge_mask(&b3, REG_DSP_MASK);
+            dsp32_and_mask(&b3, DSP32_A, REG_DSP_MASK);
+            dsp32_store(&b3, DSP32_A, R_ADDR);
+            assert(run(&b3, a, bv, NULL) == (a >= bv ? a : 0u));
+        }
+    }
+    printf("  mov/load_imm/ge_mask/and_mask: %zu operand pairs exact\n", n);
+
+    const int quadB[] = {DSP32_B, DSP32_B+1, DSP32_B+2, DSP32_B+3, REG_SCRATCH0};
+    const int mask_only[] = {REG_DSP_MASK};
+    InstrBuf b; instrbuf_init(&b); dsp32_mov(&b, DSP32_B, DSP32_A);
+    check_footprint("mov", &b, quadB, 4);
+    instrbuf_init(&b); dsp32_load_imm(&b, DSP32_B, 0x40000000u, REG_SCRATCH0);
+    check_footprint("load_imm", &b, quadB, 5);
+    instrbuf_init(&b); dsp32_and_mask(&b, DSP32_B, REG_DSP_MASK);
+    check_footprint("and_mask", &b, quadB, 4);
+    instrbuf_init(&b); dsp8_ge_mask(&b, REG_DSP_MASK);
+    check_footprint("ge_mask", &b, mask_only, 1);
+    /* T overlays the multiply operand window exactly and nothing else. */
+    assert(DSP32_T == REG_DSP_OP_A_LO && DSP32_T + 3 == REG_DSP_OP_B_HI && DSP32_T % 2 == 0);
+    assert(REG_DSP_MASK != REG_SCRATCH0 && REG_DSP_MASK >= 16);
+}
+
 static void test_cycle_prediction_matches_interpreter(void) {
     /* The cost model must agree with what actually executes. The interpreter
      * counts real steps, so compare against a hand-derived cycle total. */
@@ -482,6 +530,7 @@ int main(void) {
     test_magnitude_composition_and_bounds();
     test_no_helper_depends_on_mul_carry();
     test_register_footprints();
+    test_isqrt_building_blocks();
     test_cycle_prediction_matches_interpreter();
     printf("test_dsp32: all tests passed\n");
     return 0;
