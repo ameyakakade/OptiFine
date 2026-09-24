@@ -3,13 +3,13 @@
 
 Every number this prints is computed here from a retained raw file:
 
-  Phase A  from ``sim/fixtures/classifier_{naive,optimized}.avrora.txt`` --
+  Active-mode results  from ``sim/fixtures/classifier_{naive,optimized}.avrora.txt`` --
            Avrora's own energy report for the two compiled classifier builds.
-  Phase B  from ``sim/fixtures/phase_b/*.avrora.txt`` -- the steady-state
+  Periodic scheduling (ML)  from ``sim/fixtures/phase_b/*.avrora.txt`` -- the steady-state
            differential ``E(count=5) - E(count=4)`` per variant, which cancels
            one-time initialisation and the two policies' different wrapper
            lengths.
-  Phase B DSP  from ``sim/fixtures/phase_b_dsp/`` -- the same steady-state
+  Periodic scheduling (DSP)  from ``sim/fixtures/phase_b_dsp/`` -- the same steady-state
            differential over the DSP pipeline in the periodic wrapper, per
            prescaler, with the compiler's own compute prediction and
            ``avr-size`` of each periodic program.
@@ -122,7 +122,7 @@ def phase_a() -> dict[str, object]:
         "pct_cycles": 100.0 * d_cycles / naive["cycles"],
         "pct_energy": 100.0 * d_energy / naive["cpu_nj"],
         # Identical across naive, optimized and their difference: the Active
-        # model is a single constant per cycle, which is the Phase A finding.
+        # model is a single constant per cycle, which is the active-mode finding.
         "per_cycle_nj": naive["cpu_nj"] / naive["cycles"],
     }
 
@@ -308,7 +308,7 @@ def phase_b_dsp(directory: Path = PHASE_B_DSP) -> dict[str, object]:
 def render_phase_b_dsp_markdown(b: dict[str, object]) -> str:
     o = StringIO()
     w = o.write
-    w("## Phase B over the DSP pipeline\n\n")
+    w("## Periodic scheduling results: DSP pipeline\n\n")
     w("The frozen `--dsp` program as the periodic wake body, busy-wait versus Power-save, on\n")
     w("`models/dsp_demo_input.txt`. Per-period figures are steady-state `E(count=5) - E(count=4)`\n")
     w("increments (Avrora-model **simulated** energy). The compute requirement is the\n")
@@ -415,7 +415,7 @@ def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[st
     w("transcribed. All energy is **simulated** (Avrora's ATmega128 power\n")
     w("model), never physically measured.\n\n")
 
-    w("## Phase A: Active-mode code generation\n\n")
+    w("## Active-mode results: ML classifier\n\n")
     w("Naive (one candidate per op, every value reloaded from SRAM) versus\n")
     w("optimized (candidate diversity for MatMul plus next-use input caching).\n\n")
     w("| | naive | optimized | delta |\n|---|---:|---:|---:|\n")
@@ -424,10 +424,10 @@ def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[st
     w(f"| CPU energy (nJ) | {n['cpu_nj']:,.6f} | {p['cpu_nj']:,.6f} | {a['delta_nj']:+,.6f} ({a['pct_energy']:+.4f}%) |\n\n")
     w(f"Implied Active cost: **{a['per_cycle_nj']:.7f} nJ/cycle**, identical whether\n")
     w("derived from the naive run, the optimized run, or their difference. That\n")
-    w("identity is the Phase A finding: under Avrora's Active model, energy\n")
+    w("identity is the active-mode finding: under Avrora's Active model, energy\n")
     w("selection reduces exactly to cycle selection.\n\n")
 
-    w("## Phase B: compiler-directed sleep scheduling\n\n")
+    w("## Periodic scheduling results: ML classifier\n\n")
     w("Steady-state differentials, `E(count=5) - E(count=4)`, which cancel\n")
     w("one-time setup and the two policies' differing wrapper lengths.\n")
     w("Prescaler 8 is excluded by a static deadline check (2,048-cycle period\n")
@@ -447,7 +447,7 @@ def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[st
     for r in b:
         w(f"| {r['prescaler']} | {r['compiler_delta_nj']:,.4f} | {r['compiler_delta_active_nj']:,.4f} | "
           f"{r['active_cycles_naive']:,} -> {r['active_cycles_optimized']:,} |\n")
-    w("\nPhase A's cycle saving is worth a fixed amount per inference under sleep\n")
+    w("\nThe active-mode cycle saving is worth a fixed amount per inference under sleep\n")
     w("scheduling and **exactly zero** under busy-wait, where finishing sooner\n")
     w("only buys more polling at the same total energy.\n")
     if d is not None:
