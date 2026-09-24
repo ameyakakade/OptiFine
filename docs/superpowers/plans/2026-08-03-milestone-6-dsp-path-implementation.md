@@ -1,5 +1,23 @@
 # Milestone 6: DSP Path Implementation Plan
 
+> **Implementation status (2026-09-24).** This is the plan as written; parts
+> of it were superseded while it was carried out, and each such section below
+> carries a "Superseded" note pointing to what was built. Current behaviour
+> and measured results are in `REPORT.md` ("Milestone 6: the DSP workload")
+> and `sim/fixtures/dsp/`.
+>
+> | tasks | status |
+> |---|---|
+> | 1-5 | done as planned (Window stays fully unrolled) |
+> | 6-10 | done, re-planned around counted loops (see the 2026-08-08 amendment and the notes on each task) |
+> | 12-13 | done, with an exact integer oracle instead of a `numpy.fft` tolerance |
+> | 11, 14 | **not done**: the DSP pipeline has not been run under Phase B scheduling |
+> | 15 | `REPORT.md` has the DSP section; its Phase B DSP part waits on Task 14 |
+>
+> The flash projections in the 2026-08-08 amendment (about 497 KB unrolled)
+> are the evidence that motivated the loop redesign, kept as history. The
+> program actually built links at 12,800 B.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Real, Avrora-run, cost-priced AVR code for all five DSP ops
@@ -29,6 +47,12 @@ the original spec got wrong, discovered while writing this plan, and this
 plan is written against the corrected version, not the original).
 
 ## Global Constraints
+
+> **Superseded (2026-08-08).** The "no `rjmp`/`breq`/label/branch
+> instructions" constraint below was dropped: fully unrolled lowering could
+> not fit flash. The DSP ops are lowered with statically bounded counted loops
+> (`instrbuf_loop_*`), priced exactly per executed instruction. Data-dependent
+> decisions remain branch-free.
 
 - `DSP_FFT_SIZE=64`, `DSP_FFT_LOG2=6`, `DSP_MAX_PEAKS=8` are compile-time
   constants (`compiler/include/optifine/dsp_build.h`) -- never touched,
@@ -1226,6 +1250,12 @@ That trade is why loops were chosen over shrinking the workload.
 
 ### Blocker 2: `lower_magnitude` is wrong by a factor of sqrt(32768)
 
+> **Superseded resolution.** The scale error diagnosis below stands; the
+> resolution chosen here (alpha-max-plus-beta-min) was not implemented.
+> Magnitude computes the exact `floor(sqrt(re^2 + im^2))` with 32-bit squares
+> and a fixed 16-iteration isqrt32 (`dsp32_isqrt`); approximations remain
+> future work only.
+
 `lower_magnitude` as originally written squares via `lower_fixed_mul_q15`,
 which returns a **Q15** product (`value^2 * 32768`), then feeds it to
 `lower_isqrt16`, an **integer** square root. The result is the true
@@ -1274,6 +1304,12 @@ pair it already defines.
 - **Task 10 (`--dsp`).** Unaffected.
 
 ### Scratch map
+
+> **Superseded.** Fixed per-op offsets were replaced by a lifetime overlay:
+> any op may use any scratch cell provided it writes before reading, checked
+> by `test_asm_unit`. Current ownership is in `sram_layout.h` (FFT 0-25 plus a
+> block counter at 180, Magnitude 0, PeakExtract `selected[]` at 0-63); the
+> arena stays 181 B, and at most 64 B are live at once.
 
 Unchanged in extent: Task 7 uses offsets 0-15, Task 8 18-41 (now with
 spare cells freed by dropping isqrt), Task 9 42-179. `DSP_SCRATCH_BYTES`
@@ -1424,6 +1460,14 @@ GIT_AUTHOR_DATE="2026-08-07T16:10:00+05:30" GIT_COMMITTER_DATE="2026-08-07T16:10
 ---
 
 ## Task 7: `OP_FFT_BUTTERFLY`
+
+> **Superseded in structure.** The butterfly equations and the
+> halve-before-combine scaling below were kept; the unrolled butterfly network
+> and SRAM-staged twiddles were not. Stage 0 is one counted loop of 32
+> butterflies; stages 1-5 are a block loop (counter in scratch) around a
+> butterfly loop on r3. Twiddles come from a 32-entry program-memory table read
+> with `lpm Z+`, placed after the program's `break`. 4,230 B of code for all
+> six stages.
 
 The core algorithmic task: a host-side radix-2 DIT stage/twiddle
 generator plus the per-butterfly complex-multiply-and-combine emission,
@@ -1743,6 +1787,14 @@ GIT_AUTHOR_DATE="2026-08-08T14:00:00+05:30" GIT_COMMITTER_DATE="2026-08-08T14:00
 
 ## Task 8: Branch-free mask/select helpers, then `OP_MAGNITUDE`
 
+> **Superseded.** The SRAM-based `lower_ge_mask16`/`lower_eq_mask16`/
+> `lower_masked_select16` helpers, `lower_isqrt16`, the Q15-squared input and
+> the `DSP_SCRATCH_*` cells at offsets 18-41 (including `DSP_SCRATCH_ZERO16`)
+> were not built. Magnitude is register-resident: two exact 16x16 squares, a
+> 32-bit unsigned sum, and `dsp32_isqrt` (16 fixed iterations, mask-based), in
+> a 64-trip loop. 246 B, 51,590 cycles. There is no zero cell and no state
+> shared with PeakExtract.
+
 **Files:**
 - Modify: `compiler/src/codegen/lower.c`
 - Modify: `compiler/tests/test_dsp_lower.c`
@@ -2012,6 +2064,14 @@ GIT_AUTHOR_DATE="2026-08-09T10:30:00+05:30" GIT_COMMITTER_DATE="2026-08-09T10:30
 
 ## Task 9: `OP_PEAK_EXTRACT`
 
+> **Superseded.** Zeroing each pass's winning value, the working copy at
+> scratch offsets 42-179, and the reliance on a zero cell written by Magnitude
+> were not built: zeroing a value cannot exclude a bin whose value is already
+> 0, so an all-zero spectrum would select bin 0 eight times. PeakExtract owns
+> an explicit `selected[64]` table it zeroes on entry, compares unsigned, and
+> breaks ties toward the lower bin index (the plan's `>=` would have favoured
+> the higher one). Output is the 8 values only. 128 B, 18,943 cycles.
+
 Branch-free top-`DSP_MAX_PEAKS`-by-value selection: 8 passes, each a
 branch-free running-max reduction over all 64 magnitude values (tracking
 both value and index so only the exact winning slot gets zeroed out
@@ -2185,6 +2245,13 @@ GIT_AUTHOR_DATE="2026-08-10T11:15:00+05:30" GIT_COMMITTER_DATE="2026-08-10T11:15
 ---
 
 ## Task 10: `main.c` -- `--dsp` entry point
+
+> **Implemented with one change.** `--dsp` exists as planned and refuses
+> `--optimized`, a model path and the periodic flags. The input is not a
+> compiled-in header: `--input` reads 64 int16 samples in the ML path's text
+> format, defaulting to `models/dsp_demo_input.txt` (this plan's two-tone
+> signal). Emission goes through `codegen_emit_dsp_program`, which prices the
+> final `break` and appends the twiddle table once.
 
 **Files:**
 - Modify: `compiler/src/main.c`
@@ -2423,6 +2490,8 @@ GIT_AUTHOR_DATE="2026-08-11T09:00:00+05:30" GIT_COMMITTER_DATE="2026-08-11T09:00
 ---
 
 ## Task 11: `periodic.c` -- `DT_FIXED_Q15` output support
+
+> **Not done.** This only serves Task 14, which has not been carried out.
 
 **Files:**
 - Modify: `compiler/src/codegen/periodic.c`
@@ -2677,6 +2746,12 @@ GIT_AUTHOR_DATE="2026-08-11T15:40:00+05:30" GIT_COMMITTER_DATE="2026-08-11T15:40
 
 ## Task 12: Correctness gate against `numpy.fft`
 
+> **Superseded.** The gate is exact rather than tolerance-based:
+> `test_dsp_pipeline` compares every graph buffer of the complete program
+> against an independent integer host reference, bit for bit, on 18 inputs.
+> A floating-point DFT comparison survives only as a secondary check in
+> `test_dsp_fft`.
+
 The hard gate spec section 9 requires: "a lower-energy sequence that
 computes the wrong answer is a failed test, full stop." Runs the full
 pipeline (Tasks 4-9's `lower_op` cases, chained exactly as
@@ -2887,6 +2962,10 @@ separate task.)
 
 ## Task 13: Real Avrora run and flash-size sanity check
 
+> **Done** as `sim/fixtures/dsp/`, captured and verified by `sim/run_dsp.py`:
+> 148,335 cycles in Avrora, equal to the compiler's prediction; 12,800 B
+> `.text`; 2,517 B SRAM.
+
 **Files:**
 - Modify: `sim/run_avrora.sh` (confirm it already accepts an arbitrary
   `.s`/`.elf` path -- if not, extend it; read it first rather than
@@ -2962,6 +3041,9 @@ GIT_AUTHOR_DATE="2026-08-13T10:00:00+05:30" GIT_COMMITTER_DATE="2026-08-13T10:00
 ---
 
 ## Task 14: Phase B extension over the DSP pipeline
+
+> **Not done.** `--dsp` refuses the periodic flags; every Phase B figure is
+> from the ML classifier. This task is the remaining milestone-6 goal.
 
 **Files:**
 - Create: `sim/run_phase_b_dsp.py`
@@ -3063,6 +3145,8 @@ GIT_AUTHOR_DATE="2026-08-14T11:00:00+05:30" GIT_COMMITTER_DATE="2026-08-14T11:00
 ---
 
 ## Task 15: `REPORT.md` update
+
+> **Done except for the Phase B DSP result**, which depends on Task 14.
 
 **Files:**
 - Modify: `REPORT.md`

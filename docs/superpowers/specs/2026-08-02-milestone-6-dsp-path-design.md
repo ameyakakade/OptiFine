@@ -1,5 +1,12 @@
 # Milestone 6: DSP path instruction selection, comparison, and Phase B extension
 
+> **Status (2026-09-24).** Implemented except the Phase B extension (Goals,
+> fourth item), which has not been built. Scoping decision 2 below (no loops,
+> everything unrolled) was reversed on 2026-08-08 when the unrolled program
+> was projected at about 497 KB against 128 KiB of flash; see the
+> implementation plan's amendment and `REPORT.md` ("Milestone 6: the DSP
+> workload") for the design that was built and its measured results.
+
 ## Context
 
 Spec v2 section 8 lists seven build milestones. Milestones 1-4 are done:
@@ -33,7 +40,8 @@ everything below:
    almost certainly just re-confirm that, not produce new evidence. Effort
    goes instead into the Phase B DSP extension, which is where the actual
    new evidence lives.
-2. **No loop/branch codegen.** `candidates.c`/`lower.c`/`emit.c` only ever
+2. **No loop/branch codegen.** *(Superseded 2026-08-08: counted loops with
+   exact pricing replaced full unrolling, which could not fit flash.)* `candidates.c`/`lower.c`/`emit.c` only ever
    emit straight-line instruction sequences -- there is no `rjmp`/`breq`/
    label machinery anywhere in the candidate-selection path. This spec
    does not add one. Every DSP op is fully unrolled at the fixed
@@ -129,10 +137,14 @@ avoids needing any runtime addressing or loop machinery:
   already share `SUB`'s bucket). Chosen over an approximation (alpha-max-
   beta-min) or magnitude-squared specifically so the correctness test
   compares directly against `numpy.fft`'s true magnitude spectrum, no
-  re-derivation of the reference needed.
+  re-derivation of the reference needed. *(As built: exact `floor(sqrt(re^2 + im^2))`
+  with 32-bit squares and a fixed 16-iteration isqrt32, in a loop; the
+  Q15-square form this implies was off by sqrt(32768).)*
 - **PeakExtract** (unrolled scan): fixed top-`DSP_MAX_PEAKS`(=8)
   local-maxima extraction over the 64 magnitude values, comparison-based,
-  fully unrolled (no loop).
+  fully unrolled (no loop). *(As built: the 8 largest magnitude values,
+  largest first, compared unsigned, with explicit per-bin selection state;
+  not local maxima, and no bin positions are output. Loop-based.)*
 
 ## Correctness testing
 
@@ -148,7 +160,9 @@ the `numpy.fft` reference in Python -- does:
 2. Quantize the same signal to Q15, run it through the compiled program in
    Avrora, and capture the emitted peak list from SRAM.
 3. Compare against the `numpy.fft`-derived reference within Q15 rounding
-   tolerance -- both magnitude values and peak bin locations.
+   tolerance -- both magnitude values and peak bin locations. *(As built:
+   exact comparison against an integer host reference; the IR outputs peak
+   values only, so bin locations are checked inside the test, not output.)*
 
 This test is a hard correctness gate, same standing as
 `lower_verify_demo_forward_pass`: a lower-energy sequence that computes
@@ -202,7 +216,8 @@ Same shape as Phase A/B's existing results:
   256-byte complex working buffer or needs real extension -- verify early,
   before committing to the full unrolled butterfly network.
 - Total emitted program size (192 butterflies + 64 window multiplies + 64
-  sqrt routines + peak scan, fully unrolled) -- expected to fit AVR flash
+  sqrt routines + peak scan, fully unrolled) *(it did not: projected at about
+  497 KB; the loop-based program links at 12,800 B)* -- expected to fit AVR flash
   comfortably (128KB) but worth a sanity check on `.elf` size once the
   first full build compiles.
 
