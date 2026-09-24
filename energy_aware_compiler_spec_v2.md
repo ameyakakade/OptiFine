@@ -154,7 +154,7 @@ enum OpKind {
     BitReverse,    // bit-reversal permutation ahead of the butterfly stages
     FftButterfly,  // one radix-2 DIT butterfly stage
     Magnitude,     // complex magnitude from FFT output
-    PeakExtract,   // local-maxima extraction over the magnitude spectrum
+    PeakExtract,   // top-8 magnitude values, largest first (as implemented: values only)
 }
 
 enum DType {
