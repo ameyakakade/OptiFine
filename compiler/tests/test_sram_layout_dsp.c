@@ -44,13 +44,15 @@ static void test_dsp_graph_layout_succeeds_and_reserves_scratch(void) {
     ir_graph_free(&graph);
 }
 
-/* The FFT block counter sits after the documented 0-179 scratch map
- * (butterfly cells 0-25, the planned Magnitude cells 18-41 and PeakExtract
- * cells 42-179), so it overlaps none of them, and inside the region. */
+/* The FFT block counter sits at offset 180, placed past the pre-overlay
+ * plan's 0-179 map (butterfly cells 0-25, then Magnitude 18-41 and
+ * PeakExtract 42-179 -- offsets that plan assigned, not ones the built ops
+ * use; see sram_layout.h for the current ownership), and inside the region. */
 static void test_fft_block_counter_has_its_own_cell(void) {
     assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 26);   /* past the butterfly's BF_* cells */
-    assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 42);   /* past planned Magnitude 18-41 */
-    assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 180);  /* past planned PeakExtract 42-179 */
+    assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 42);   /* past the old plan's Magnitude 18-41 */
+    assert(DSP_SCRATCH_FFT_OUTER_COUNT >= 180);  /* past the old plan's PeakExtract 42-179 */
+    assert(DSP_SCRATCH_PK_SELECTED + 64 <= DSP_SCRATCH_BYTES); /* PeakExtract's selected[] fits */
     assert(DSP_SCRATCH_FFT_OUTER_COUNT + 1 <= DSP_SCRATCH_BYTES);
 }
 
