@@ -26,7 +26,7 @@ static void usage(const char *argv0) {
             "               int16 Q15 samples (default models/dsp_demo_input.txt). No model path or\n"
             "               --optimized; the periodic flags wrap it as they wrap the ML body\n"
             "  --optimized  use codegen/candidates.c's real candidate diversity "
-            "(milestone 5) instead of Phase A's naive single-candidate baseline\n"
+            "instead of the naive single-candidate baseline\n"
             "  periodic mode requires --periodic-count, --wait-policy, and "
             "--timer-prescaler together\n",
             argv0, argv0);
