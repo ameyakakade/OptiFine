@@ -20,9 +20,9 @@ every figure from raw simulator output with `python3 sim/report_results.py`.
 top-8 PeakExtract) into one AVR program: 12,800 B of flash, 2,517 B of SRAM,
 148,335 cycles, with the compiler's cycle prediction matching Avrora exactly.
 Every intermediate buffer matches an independent integer host reference
-bit-for-bit. Phase B's periodic sleep scheduling has so far been run on the ML
-workload only; `--dsp` does not accept the periodic flags yet (see
-`REPORT.md`). Figures are simulated (Avrora), not measured on hardware.
+bit-for-bit. Phase B's periodic sleep scheduling runs on both workloads: at the
+one prescaler whose period can hold the DSP body, sleeping instead of polling
+saves 43% per period. Figures are simulated (Avrora), not measured on hardware.
 
 See `energy_aware_compiler_spec_v2.md` for the build spec and milestone order.
 
@@ -35,7 +35,7 @@ See `energy_aware_compiler_spec_v2.md` for the build spec and milestone order.
 | Energy-cost selection | Via `cost_table.toml` (cited sources required) |
 | Register allocation | Next-use information for AVR's limited register file |
 | AVR assembly emission | `avr-gcc`/`avr-as` → ELF → Avrora simulation |
-| Sleep scheduling | Periodic wrapper with busy-wait or Power-save waiting (Phase B, ML workload) |
+| Sleep scheduling | Periodic wrapper with busy-wait or Power-save waiting (Phase B, ML and DSP workloads) |
 | DSP pipeline | `--dsp`: 64-point Q15 FFT pipeline lowered with statically bounded counted loops, exact cycle pricing |
 | End-to-end comparison | Same model compiled naive vs. optimized, both simulated |
 
@@ -223,8 +223,8 @@ compiler/build/optifine --dsp --cost-table cost_table.toml --input samples.txt -
 The input file holds 64 decimal int16 (Q15) samples separated by whitespace;
 `#` starts a comment. The samples are embedded in the program at compile time,
 as the ML path embeds its demo input. The compiler prints its predicted cycles
-and SRAM use on stderr. `--dsp` takes no model path, and refuses `--optimized`
-(the DSP ops have a single candidate each) and the periodic flags.
+and SRAM use on stderr. `--dsp` takes no model path and refuses `--optimized`
+(the DSP ops have a single candidate each).
 
 Simulate it with the same wrapper as the ML builds. This repository's Avrora
 workflow runs on the bundled JDK 8; a newer JDK (such as one installed by mise)
@@ -245,6 +245,22 @@ JAVA_HOME=$PWD/tools/jdk8u504-b01 \
 python3 sim/run_dsp.py compare sim/fixtures/dsp build/dsp_new  # same program, same figures?
 ```
 
+The Phase B periodic flags wrap the same DSP program as they wrap the ML body:
+
+```bash
+compiler/build/optifine --dsp --cost-table cost_table.toml --out build/dsp_ps.S \
+  --periodic-count 4 --wait-policy powersave --timer-prescaler 1024
+
+python3 sim/run_phase_b_dsp.py                                         # revalidate the retained sweep; runs no tool
+python3 sim/run_phase_b_dsp.py run-new --output-dir build/phase_b_dsp  # fresh 16-run sweep
+```
+
+The sweep covers the same four prescalers and both wait policies as the ML one.
+Only prescaler 1024 (a 262,144-cycle period) is long enough for the 147,565-cycle
+DSP body; the other three are reported as compute-bound, with no idle window.
+The saving at 1024 depends on how much of the period is idle, not on the DSP
+code (see `REPORT.md`).
+
 ## Commands
 
 ### Compiler (`optifine`)
@@ -254,6 +270,7 @@ optifine <model.onnx> --cost-table <cost_table.toml> --out <out.s> [--input <vec
          [--optimized] [--periodic-count <n> --wait-policy active|powersave
           --timer-prescaler 8|32|128|1024]
 optifine --dsp --cost-table <cost_table.toml> --out <out.s> [--input <samples.txt>]
+         [--periodic-count <n> --wait-policy active|powersave --timer-prescaler 8|32|128|1024]
 ```
 
 | Flag | Description |
@@ -368,6 +385,7 @@ OptiFine/
 │   ├── report_results.py      # Derive every result table from raw output
 │   ├── run_phase_b.py         # Phase B experiment runner
 │   ├── run_dsp.py             # DSP baseline capture / check / compare
+│   ├── run_phase_b_dsp.py     # Phase B sweep over the DSP pipeline
 │   └── fixtures/              # Retained raw evidence (dsp/ = canonical DSP run)
 ├── models/
 │   ├── tiny_classifier.onnx   # Exported demo model
@@ -400,7 +418,7 @@ Covers: IR construction, cost table loading, candidate generation correctness (v
 | 3 | ONNX ingestion (MatMul, Add, Relu, Requantize) | ✅ |
 | 4 | DSP builder + fixed 64-point FFT pipeline (IR only; lowering is milestone 6) | ✅ |
 | 5 | Full instruction selection + regalloc + cost-table select (locality pass not implemented) | ✅ |
-| 6 | DSP lowering + end-to-end DSP comparison | ✅ complete pipeline via `--dsp`, Avrora-verified; DSP under Phase B scheduling not yet done |
+| 6 | DSP lowering + end-to-end DSP comparison | ✅ complete pipeline via `--dsp`, Avrora-verified, including under Phase B scheduling |
 | 7 | Sourcing (cost table) + write REPORT.md | ✅ cost table sourced; REPORT.md drafted |
 | — | Phase B: compiler-emitted sleep scheduling (added after the original plan) | ✅ |
 

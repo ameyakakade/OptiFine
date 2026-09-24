@@ -1,7 +1,7 @@
 # Milestone 6: DSP path instruction selection, comparison, and Phase B extension
 
-> **Status (2026-09-24).** Implemented except the Phase B extension (Goals,
-> fourth item), which has not been built. Scoping decision 2 below (no loops,
+> **Status (2026-09-24).** Implemented, including the Phase B extension (Goals,
+> fourth item; `sim/fixtures/phase_b_dsp/`). Scoping decision 2 below (no loops,
 > everything unrolled) was reversed on 2026-08-08 when the unrolled program
 > was projected at about 497 KB against 128 KiB of flash; see the
 > implementation plan's amendment and `REPORT.md` ("Milestone 6: the DSP

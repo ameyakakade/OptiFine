@@ -11,8 +11,8 @@
 > | 1-5 | done as planned (Window stays fully unrolled) |
 > | 6-10 | done, re-planned around counted loops (see the 2026-08-08 amendment and the notes on each task) |
 > | 12-13 | done, with an exact integer oracle instead of a `numpy.fft` tolerance |
-> | 11, 14 | **not done**: the DSP pipeline has not been run under Phase B scheduling |
-> | 15 | `REPORT.md` has the DSP section; its Phase B DSP part waits on Task 14 |
+> | 11, 14 | done (2026-09-24): the DSP pipeline runs under Phase B scheduling |
+> | 15 | done: `REPORT.md` has the DSP section, including its Phase B result |
 >
 > The flash projections in the 2026-08-08 amendment (about 497 KB unrolled)
 > are the evidence that motivated the loop redesign, kept as history. The
@@ -2491,7 +2491,16 @@ GIT_AUTHOR_DATE="2026-08-11T09:00:00+05:30" GIT_COMMITTER_DATE="2026-08-11T09:00
 
 ## Task 11: `periodic.c` -- `DT_FIXED_Q15` output support
 
-> **Not done.** This only serves Task 14, which has not been carried out.
+> **Done (as built).** `periodic_output_addr` returns the output's byte length
+> (element count x element size: 4 for the ML INT8[4], 16 for the DSP
+> FIXED_Q15[8]) instead of requiring INT8[4], and the terminal copy and
+> `META output_len` use it. `lower_output` needed no change (its element-width
+> bug was fixed earlier). New: the wrapper emits the program-memory constants
+> (the twiddle table) after its ISR via `codegen_emit_constant_data`, and
+> `--dsp` accepts the periodic flags. The tests live in `test_dsp_pipeline`
+> (periodic body identical to the ordinary program; five iterations
+> reproduce the output) and `test_dsp_cli`, not `test_periodic`/
+> `test_dsp_lower`; every ML periodic program is byte-identical to before.
 
 **Files:**
 - Modify: `compiler/src/codegen/periodic.c`
@@ -3042,8 +3051,15 @@ GIT_AUTHOR_DATE="2026-08-13T10:00:00+05:30" GIT_COMMITTER_DATE="2026-08-13T10:00
 
 ## Task 14: Phase B extension over the DSP pipeline
 
-> **Not done.** `--dsp` refuses the periodic flags; every Phase B figure is
-> from the ML classifier. This task is the remaining milestone-6 goal.
+> **Done (as built)** as `sim/run_phase_b_dsp.py` and `sim/fixtures/phase_b_dsp/`:
+> the 16-run sweep (4 prescalers x 2 policies x counts 4/5), reusing
+> `run_phase_b.py`'s compile/assemble/Avrora, identity and static-deadline
+> code and `compare_steady_state_reports`. Prescalers 8, 32 and 128 are
+> compute-bound (period shorter than the 147,565-cycle body); 1024 is
+> accepted, saving 42.97% per period. One rule differs from the ML sweep:
+> busy-wait wake detection jitters within its 8-cycle poll loop, so a pair
+> whose busy-wait increment is within 8 cycles of the exact period is
+> accepted with busy-wait energy scaled to the period (see `REPORT.md`).
 
 **Files:**
 - Create: `sim/run_phase_b_dsp.py`
@@ -3146,7 +3162,7 @@ GIT_AUTHOR_DATE="2026-08-14T11:00:00+05:30" GIT_COMMITTER_DATE="2026-08-14T11:00
 
 ## Task 15: `REPORT.md` update
 
-> **Done except for the Phase B DSP result**, which depends on Task 14.
+> **Done**, including the Phase B DSP result.
 
 **Files:**
 - Modify: `REPORT.md`
