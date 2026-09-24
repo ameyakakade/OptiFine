@@ -9,6 +9,10 @@ Every number this prints is computed here from a retained raw file:
            differential ``E(count=5) - E(count=4)`` per variant, which cancels
            one-time initialisation and the two policies' different wrapper
            lengths.
+  Phase B DSP  from ``sim/fixtures/phase_b_dsp/`` -- the same steady-state
+           differential over the DSP pipeline in the periodic wrapper, per
+           prescaler, with the compiler's own compute prediction and
+           ``avr-size`` of each periodic program.
   DSP      from ``sim/fixtures/dsp/`` -- the complete ``optifine --dsp``
            program's Avrora report, the compiler's own cost printout,
            ``avr-size -A`` of the linked ELF, and ``test_dsp_pipeline``'s
@@ -37,6 +41,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "sim" / "fixtures"
 PHASE_B = FIXTURES / "phase_b"
 DSP = FIXTURES / "dsp"
+PHASE_B_DSP = FIXTURES / "phase_b_dsp"
+DSP_PRESCALERS = (8, 32, 128, 1024)
 
 #: Target clock and memory sizes the DSP figures are expressed against.
 CLOCK_HZ = 8_000_000
@@ -247,6 +253,96 @@ def dsp(directory: Path = DSP) -> dict[str, object]:
     }
 
 
+def phase_b_dsp(directory: Path = PHASE_B_DSP) -> dict[str, object]:
+    """DSP under the periodic wrapper, per prescaler, from the raw files.
+
+    A prescaler whose Timer0 period is not longer than the compiler-predicted
+    body is compute-bound: there is no idle window to sleep through, and it
+    is reported as such rather than given an energy figure. Otherwise the
+    energies are the E(count=5) - E(count=4) increments; the busy-wait
+    increment is scaled to the exact period when it lies within the poll
+    loop's window of it (see sim/run_phase_b_dsp.py, which applies the same
+    rule and records it).
+    """
+    from run_phase_b_dsp import POLL_LOOP_CYCLES, TIMER0_PERIOD_CYCLES_PER_DIVISOR
+
+    rows = []
+    for d in DSP_PRESCALERS:
+        stem = f"p{d}_dsp"
+        cp = directory / f"{stem}_active.compile.txt"
+        compute = int(_need(re.search(r"periodic per-inference predicted compute cost: (\d+) cycles",
+                                      _read(cp)), "predicted compute line", cp).group(1))
+        period = TIMER0_PERIOD_CYCLES_PER_DIVISOR * d
+        row: dict[str, object] = {"prescaler": d, "period_cycles": period, "compute_cycles": compute,
+                                  "idle_cycles": period - compute}
+        if compute >= period:
+            row["status"] = "compute-bound (no idle window)"
+            rows.append(row)
+            continue
+        a4, a5 = (parse_energy(directory / f"{stem}_active{s}.avrora.txt") for s in ("", "_n5"))
+        p4, p5 = (parse_energy(directory / f"{stem}_powersave{s}.avrora.txt") for s in ("", "_n5"))
+        a_cyc, p_cyc = a5["cycles"] - a4["cycles"], p5["cycles"] - p4["cycles"]
+        if p_cyc != period or abs(a_cyc - period) > POLL_LOOP_CYCLES:
+            raise MissingArtifact(f"{stem}: increments {a_cyc}/{p_cyc} do not fit the {period}-cycle period")
+        a_nj = (a5["cpu_nj"] - a4["cpu_nj"]) * period / a_cyc
+        p_nj = p5["cpu_nj"] - p4["cpu_nj"]
+        size = _read(directory / f"{stem}_powersave.size.txt")
+        text = int(_need(re.search(r"^\.text\s+(\d+)\s", size, re.M), ".text", directory / f"{stem}_powersave.size.txt").group(1))
+        asm = _read(directory / f"{stem}_powersave.S")
+        last = int(_need(re.search(r"; META completed_count_addr=0x([0-9A-Fa-f]+)", asm), "scheduler META",
+                         directory / f"{stem}_powersave.S").group(1), 16)
+        row.update({
+            "status": "accepted",
+            "busy_wait_increment_cycles": a_cyc, "power_save_increment_cycles": p_cyc,
+            "active_nj": a_nj, "powersave_nj": p_nj, "saved_nj": a_nj - p_nj,
+            "saving_pct": 100.0 * (a_nj - p_nj) / a_nj,
+            "powersave_active_cycles": p5["active_cycles"] - p4["active_cycles"],
+            "powersave_sleep_cycles": p5["powersave_cycles"] - p4["powersave_cycles"],
+            "text": text,
+            "static_sram": last + 1 - 0x0200,
+        })
+        rows.append(row)
+    return {"rows": rows}
+
+
+def render_phase_b_dsp_markdown(b: dict[str, object]) -> str:
+    o = StringIO()
+    w = o.write
+    w("## Phase B over the DSP pipeline\n\n")
+    w("The frozen `--dsp` program as the periodic wake body, busy-wait versus Power-save, on\n")
+    w("`models/dsp_demo_input.txt`. Per-period figures are steady-state `E(count=5) - E(count=4)`\n")
+    w("increments (Avrora-model **simulated** energy). The compute requirement is the\n")
+    w("compiler's prediction for the DSP body; a prescaler whose Timer0 period is not longer\n")
+    w("than it has no idle window and gets no energy figure.\n\n")
+    w("| prescaler | period (cyc) | DSP compute (cyc) | idle window (cyc) | busy-wait (nJ/period) | "
+      "Power-save (nJ/period) | saved (nJ) | saving % | status |\n")
+    w("|---:|---:|---:|---:|---:|---:|---:|---:|---|\n")
+    for r in b["rows"]:
+        if r["status"] != "accepted":
+            w(f"| {r['prescaler']} | {r['period_cycles']:,} | {r['compute_cycles']:,} | "
+              f"none (body exceeds period by {-r['idle_cycles']:,}) | -- | -- | -- | -- | {r['status']} |\n")
+            continue
+        w(f"| {r['prescaler']} | {r['period_cycles']:,} | {r['compute_cycles']:,} | {r['idle_cycles']:,} | "
+          f"{r['active_nj']:,.4f} | {r['powersave_nj']:,.4f} | {r['saved_nj']:,.4f} | {r['saving_pct']:.2f}% | "
+          f"accepted |\n")
+    for r in b["rows"]:
+        if r["status"] != "accepted":
+            continue
+        w(f"\nAt prescaler {r['prescaler']} the Power-save period splits into "
+          f"{r['powersave_active_cycles']:,} Active and {r['powersave_sleep_cycles']:,} Power-save cycles. The\n")
+        w(f"busy-wait increment measured {r['busy_wait_increment_cycles']:,} cycles: its 8-cycle poll loop detects\n")
+        w("each wake up to 8 cycles late, and with this body the detection phase does not settle, so\n")
+        w(f"its energy is scaled to the exact {r['period_cycles']:,}-cycle period (all of it Active cycles at\n")
+        w("constant power). The periodic program links at "
+          f"{r['text']:,} B of .text; static SRAM is {r['static_sram']:,} B (the\n")
+        w("DSP tensors and scratch plus 4 scheduler bytes), and the timer interrupt uses at most\n")
+        w("4 B of stack.\n")
+    w("\nThe saving comes from sleeping through the idle part of each period instead of polling,\n")
+    w("so it depends on the duty cycle -- here roughly 56% compute -- not on the DSP code. It is\n")
+    w("not a fixed OptiFine saving, and the three shorter periods cannot hold the body at all.\n")
+    return o.getvalue()
+
+
 def render_dsp_markdown(d: dict[str, object], directory: Path = DSP, a: dict[str, object] | None = None) -> str:
     o = StringIO()
     w = o.write
@@ -309,7 +405,8 @@ def render_dsp_csv(d: dict[str, object]) -> str:
     return o.getvalue()
 
 
-def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[str, object] | None = None) -> str:
+def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[str, object] | None = None,
+                    bd: dict[str, object] | None = None) -> str:
     o = StringIO()
     w = o.write
     w("# OptiFine results (generated)\n\n")
@@ -356,10 +453,14 @@ def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[st
     if d is not None:
         w("\n")
         w(render_dsp_markdown(d, DSP, a))
+    if bd is not None:
+        w("\n")
+        w(render_phase_b_dsp_markdown(bd))
     return o.getvalue()
 
 
-def render_csv(a: dict[str, object], b: list[dict[str, object]], d: dict[str, object] | None = None) -> str:
+def render_csv(a: dict[str, object], b: list[dict[str, object]], d: dict[str, object] | None = None,
+               bd: dict[str, object] | None = None) -> str:
     o = StringIO()
     wr = csv.writer(o, lineterminator="\n")
     wr.writerow(["phase", "metric", "variant", "prescaler", "value", "unit"])
@@ -379,6 +480,19 @@ def render_csv(a: dict[str, object], b: list[dict[str, object]], d: dict[str, ob
             wr.writerow(["B", key, "optimized", pre, f"{r[key]:.6f}", unit])
     if d is not None:
         o.write(render_dsp_csv(d).split("\n", 1)[1])
+    if bd is not None:
+        for r in bd["rows"]:
+            if r["idle_cycles"] < 0:
+                wr.writerow(["B-DSP", "overrun_cycles", r["status"], r["prescaler"], -r["idle_cycles"], "cycles"])
+            else:
+                wr.writerow(["B-DSP", "idle_cycles", r["status"], r["prescaler"], r["idle_cycles"], "cycles"])
+            for key, unit in (("period_cycles", "cycles"), ("compute_cycles", "cycles"),
+                              ("active_nj", "nJ"), ("powersave_nj", "nJ"), ("saved_nj", "nJ"), ("saving_pct", "%")):
+                if key == "idle_cycles":
+                    continue
+                if key in r:
+                    value = r[key] if isinstance(r[key], int) else f"{r[key]:.6f}"
+                    wr.writerow(["B-DSP", key, r["status"], r["prescaler"], value, unit])
     return o.getvalue()
 
 
@@ -389,11 +503,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-dir", type=Path, help="write results.md and results.csv here")
     args = ap.parse_args(argv)
     try:
-        a, b, d = phase_a(), phase_b(), dsp()
+        a, b, d, bd = phase_a(), phase_b(), dsp(), phase_b_dsp()
     except MissingArtifact as error:
         print(f"report_results: {error}", file=sys.stderr)
         return 2
-    md, cs = render_markdown(a, b, d), render_csv(a, b, d)
+    md, cs = render_markdown(a, b, d, bd), render_csv(a, b, d, bd)
     if args.out_dir:
         args.out_dir.mkdir(parents=True, exist_ok=True)
         (args.out_dir / "results.md").write_text(md, encoding="utf-8")

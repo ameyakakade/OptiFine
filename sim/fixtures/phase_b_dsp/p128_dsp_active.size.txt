@@ -1,0 +1,8 @@
+sim/fixtures/phase_b_dsp/p128_dsp_active.elf  :
+section      size      addr
+.data           0   8388864
+.text       13166         0
+.avr.prop       9         0
+Total       13175
+
+

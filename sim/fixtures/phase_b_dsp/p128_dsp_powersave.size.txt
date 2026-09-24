@@ -1,0 +1,8 @@
+sim/fixtures/phase_b_dsp/p128_dsp_powersave.elf  :
+section      size      addr
+.data           0   8388864
+.text       13172         0
+.avr.prop       9         0
+Total       13181
+
+
