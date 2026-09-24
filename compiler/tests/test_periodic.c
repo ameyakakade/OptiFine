@@ -38,6 +38,16 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
     return fprintf(out, "    ldi r20, 0\n    sts 0x0240, r20\n") < 0 ? -1 : 0;
 }
 
+/* Stub: the stubbed graphs carry no program-memory constant data. */
+int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model,
+                               EmitUnit *unit, FILE *out) {
+    (void)graph;
+    (void)cost_model;
+    (void)unit;
+    (void)out;
+    return 0;
+}
+
 int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
                                 const RegAllocResult *regalloc, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,

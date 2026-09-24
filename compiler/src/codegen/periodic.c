@@ -5,7 +5,6 @@
 
 enum {
     PERIODIC_SCHEDULER_BYTES = 4,
-    PERIODIC_TERMINAL_OUTPUT_BYTES = 4,
 };
 
 static int emitf(FILE *out, const char *format, ...) {
@@ -49,8 +48,11 @@ int periodic_options_validate(const PeriodicOptions *options) {
     return timer0_clock_select_bits(options->timer_prescaler, &timer_bits);
 }
 
+/* The terminal OP_OUTPUT tensor's address and byte length: element count
+ * times element size, so the ML classifier's INT8[4] is 4 bytes and the DSP
+ * pipeline's FIXED_Q15[8] is 16. */
 static int periodic_output_addr(const IrGraph *graph, const SramLayout *layout,
-                                uint16_t *out_addr) {
+                                uint16_t *out_addr, unsigned *out_len) {
     if (graph == NULL || graph->ops == NULL || graph->count == 0 ||
         layout->op_addr == NULL || layout->count < graph->count) {
         return -1;
@@ -58,7 +60,8 @@ static int periodic_output_addr(const IrGraph *graph, const SramLayout *layout,
 
     size_t output_op_id = graph->count - 1;
     const IrOp *output_op = &graph->ops[output_op_id];
-    if (output_op->kind != OP_OUTPUT || output_op->dtype != DT_INT8) {
+    size_t elem_size = sram_layout_elem_size(output_op->dtype);
+    if (output_op->kind != OP_OUTPUT || elem_size == 0) {
         return -1;
     }
 
@@ -70,18 +73,19 @@ static int periodic_output_addr(const IrGraph *graph, const SramLayout *layout,
         }
         output_elements *= output_op->output_shape[i];
     }
-    if (output_elements != PERIODIC_TERMINAL_OUTPUT_BYTES) {
+    if (output_elements > 256 / elem_size) {
         return -1;
     }
+    size_t output_bytes = output_elements * elem_size;
 
     uint32_t address = layout->op_addr[output_op_id];
     uint32_t scheduler_start = (uint32_t)SRAM_LAYOUT_BASE + layout->bytes_used;
-    if (address < SRAM_LAYOUT_BASE ||
-        address + PERIODIC_TERMINAL_OUTPUT_BYTES > scheduler_start) {
+    if (address < SRAM_LAYOUT_BASE || address + output_bytes > scheduler_start) {
         return -1;
     }
 
     *out_addr = (uint16_t)address;
+    *out_len = (unsigned)output_bytes;
     return 0;
 }
 
@@ -120,8 +124,9 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
     }
 
     uint16_t output_addr;
+    unsigned output_len;
     uint8_t timer_bits;
-    if (periodic_output_addr(graph, layout, &output_addr) != 0 ||
+    if (periodic_output_addr(graph, layout, &output_addr, &output_len) != 0 ||
         timer0_clock_select_bits(options->timer_prescaler, &timer_bits) != 0) {
         return -1;
     }
@@ -251,7 +256,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
               "; no simulator SRAM readback is claimed.\n"
               "; META completed_count_addr=0x%04X\n"
               "; META overrun_addr=0x%04X\n"
-              "; META output_addr=0x%04X output_len=4\n"
+              "; META output_addr=0x%04X output_len=%u\n"
               "    lds r16, 0x%04X\n"
               "    sts 0x%04X, r16\n"
               "    lds r16, 0x%04X\n"
@@ -265,6 +270,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
               (unsigned)out_cost->completed_addr,
               (unsigned)out_cost->overrun_addr,
               (unsigned)output_addr,
+              output_len,
               (unsigned)out_cost->completed_addr,
               (unsigned)out_cost->completed_addr,
               (unsigned)out_cost->overrun_addr,
@@ -272,7 +278,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
         return -1;
     }
 
-    for (unsigned i = 0; i < PERIODIC_TERMINAL_OUTPUT_BYTES; i++) {
+    for (unsigned i = 0; i < output_len; i++) {
         unsigned address = (unsigned)output_addr + i;
         if (emitf(out,
                   "    lds r16, 0x%04X\n"
@@ -303,6 +309,12 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
               (unsigned)out_cost->running_addr,
               (unsigned)out_cost->overrun_addr,
               (unsigned)out_cost->tick_addr) != 0) {
+        return -1;
+    }
+
+    /* Program-memory constants (the DSP twiddle table) go after the ISR's
+     * reti: no path falls through to them. Nothing is written for ML. */
+    if (codegen_emit_constant_data(graph, cost_model, &unit, out) != 0) {
         return -1;
     }
 

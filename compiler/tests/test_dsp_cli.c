@@ -71,12 +71,33 @@ int main(int argc, char **argv) {
 
     /* Combinations DSP mode refuses, each a usage error (exit 2). */
     const char *bad[] = {"--dsp --optimized", "--dsp some_model.onnx",
-                         "--dsp --periodic-count 4 --wait-policy active --timer-prescaler 8"};
+                         "--dsp --periodic-count 4",                        /* incomplete periodic set */
+                         "--dsp --periodic-count 4 --wait-policy active --timer-prescaler 64"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         snprintf(args, sizeof(args), "%s --cost-table %s --out %s", bad[i], g_cost, out);
         int rc = run(args);
         assert(rc != 0 && WEXITSTATUS(rc) == 2);
         printf("  '%s': usage error\n", bad[i]);
+    }
+    /* Phase B: --dsp inside the periodic wrapper, both wait policies. */
+    const char *policies[] = {"active", "powersave"};
+    for (int p = 0; p < 2; p++) {
+        snprintf(out, sizeof(out), "%s/dsp_cli_periodic_%s.S", g_dir, policies[p]);
+        snprintf(args, sizeof(args), "--dsp --cost-table %s --periodic-count 4 --wait-policy %s "
+                 "--timer-prescaler 1024 --out %s", g_cost, policies[p], out);
+        assert(run(args) == 0);
+        char *a = slurp(out);
+        assert(a && strstr(a, "; BODY BEGIN") && strstr(a, "; BODY END") && strstr(a, "timer0_ovf_isr:"));
+        assert(strstr(a, "output_len=16"));                             /* FIXED_Q15[8] */
+        char *tw = strstr(a, ".Ltw:");
+        assert(tw && strstr(tw + 1, ".Ltw:") == NULL);                  /* one table ... */
+        assert(tw > strstr(a, "reti"));                                  /* ... after the ISR */
+        assert((strstr(a, "sleep") != NULL) == (p == 1));
+        free(a);
+        char *log2 = slurp((snprintf(in, sizeof(in), "%s/cli.log", g_dir), in));
+        assert(log2 && strstr(log2, "periodic per-inference predicted compute cost: "));
+        free(log2);
+        printf("  --dsp --wait-policy %s --timer-prescaler 1024: periodic program written\n", policies[p]);
     }
     printf("test_dsp_cli: all tests passed\n");
     return 0;

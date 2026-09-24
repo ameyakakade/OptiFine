@@ -1,0 +1,5 @@
+# Expected OP_OUTPUT of `optifine --dsp` on models/dsp_demo_input.txt: the 8
+# largest magnitudes (unsigned, Q15 units), largest first. Computed by the
+# independent host reference in compiler/tests/test_dsp_pipeline.c, which
+# asserts this file, the reference and the generated program all agree.
+2621 2619 1748 1747 1138 1137 1136 1136

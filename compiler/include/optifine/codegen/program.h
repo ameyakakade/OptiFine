@@ -65,6 +65,14 @@ int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
                           int use_real_candidates,
                           FILE *out, ProgramCost *out_cost);
 
+/* Emits the graph's program-memory constant data (the DSP twiddle table) as
+ * part of `unit`, for a program whose code ends elsewhere -- the periodic
+ * wrapper places it after its interrupt handler's reti, where control never
+ * falls. Writes nothing for a graph with no such data (every ML graph), so ML
+ * output is unaffected. */
+int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model,
+                               EmitUnit *unit, FILE *out);
+
 /* The DSP path's complete program (graph from dsp_build_pipeline): one
  * assembly unit holding the zero-register init, OP_INPUT (the samples,
  * embedded at compile time exactly as the ML path embeds its demo input) and

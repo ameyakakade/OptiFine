@@ -132,6 +132,7 @@ add_test(NAME test_sram_layout_dsp COMMAND test_sram_layout_dsp)
 
 add_executable(test_periodic test_periodic.c
     ${CMAKE_SOURCE_DIR}/src/codegen/periodic.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
 )
 target_include_directories(test_periodic PRIVATE ${CMAKE_SOURCE_DIR}/include)
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
@@ -376,6 +377,7 @@ add_executable(test_dsp_pipeline test_dsp_pipeline.c
     ${CMAKE_SOURCE_DIR}/src/codegen/regalloc.c
     ${CMAKE_SOURCE_DIR}/src/codegen/select.c
     ${CMAKE_SOURCE_DIR}/src/codegen/program.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/periodic.c
 )
 target_include_directories(test_dsp_pipeline PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")

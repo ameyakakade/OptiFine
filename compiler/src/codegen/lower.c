@@ -1043,16 +1043,27 @@ static void lower_peak_extract(InstrBuf *buf, const IrGraph *graph, const SramLa
     instrbuf_loop_end(buf, &passes);
 }
 
+static void emit_constant_data(InstrBuf *buf, const IrGraph *graph) {
+    for (size_t i = 0; i < graph->count; i++) {
+        if (graph->ops[i].kind == OP_FFT_BUTTERFLY) {
+            dsp_emit_twiddle_table(buf);
+            return;
+        }
+    }
+}
+
 int lower_dsp_program_end(const IrGraph *graph, const CostModel *cost_model, Candidate *out) {
     InstrBuf buf;
     instrbuf_init(&buf);
     ins0(&buf, "break");
-    for (size_t i = 0; i < graph->count; i++) {
-        if (graph->ops[i].kind == OP_FFT_BUTTERFLY) {
-            dsp_emit_twiddle_table(&buf);
-            break;
-        }
-    }
+    emit_constant_data(&buf, graph);
+    return instrbuf_price(&buf, cost_model, out);
+}
+
+int lower_dsp_constant_data(const IrGraph *graph, const CostModel *cost_model, Candidate *out) {
+    InstrBuf buf;
+    instrbuf_init(&buf);
+    emit_constant_data(&buf, graph);
     return instrbuf_price(&buf, cost_model, out);
 }
 

@@ -20,10 +20,11 @@ static void usage(const char *argv0) {
             "[--input <golden_input.txt>] [--optimized] "
             "[--periodic-count N --wait-policy active|powersave --timer-prescaler N]\n"
             "       %s --dsp --cost-table <cost_table.toml> --out <out.s> [--input <samples.txt>]\n"
+            "            [--periodic-count N --wait-policy active|powersave --timer-prescaler N]\n"
             "  --dsp        compile the fixed 64-point DSP pipeline (Window, BitReverse, FFT x6,\n"
             "               Magnitude, PeakExtract) instead of an ONNX model. --input holds its 64\n"
-            "               int16 Q15 samples (default models/dsp_demo_input.txt); no model path,\n"
-            "               --optimized or periodic flags\n"
+            "               int16 Q15 samples (default models/dsp_demo_input.txt). No model path or\n"
+            "               --optimized; the periodic flags wrap it as they wrap the ML body\n"
             "  --optimized  use codegen/candidates.c's real candidate diversity "
             "(milestone 5) instead of Phase A's naive single-candidate baseline\n"
             "  periodic mode requires --periodic-count, --wait-policy, and "
@@ -95,10 +96,23 @@ static int8_t *read_dsp_input(const char *path, size_t *out_len) {
     return (int8_t *)buf;
 }
 
+/* The periodic cost lines, shared by the ML and --dsp periodic modes;
+ * sim/run_phase_b*.py parse them. */
+static void print_periodic_cost(const PeriodicOptions *options, const PeriodicProgramCost *cost) {
+    fprintf(stderr, "periodic policy: %s\n", options->policy == WAIT_ACTIVE ? "active" : "powersave");
+    fprintf(stderr, "periodic timer prescaler: %u (Timer0 divisor)\n", options->timer_prescaler);
+    fprintf(stderr, "periodic inference count: %u\n", options->inference_count);
+    fprintf(stderr, "periodic initialization predicted cost: %u cycles, %.3f nJ\n",
+            cost->initialization.cycles, cost->initialization.energy_nj);
+    fprintf(stderr, "periodic per-inference predicted compute cost: %u cycles, %.3f nJ\n",
+            cost->inference.cycles, cost->inference.energy_nj);
+}
+
 /* --dsp: the graph comes from dsp_build_pipeline, not ONNX, and is emitted
  * by codegen_emit_dsp_program. There is no ML forward-pass check to run; the
  * DSP lowering's correctness is pinned by test_dsp_pipeline's host oracle. */
-static int run_dsp(const char *cost_table_path, const char *input_path, const char *out_path) {
+static int run_dsp(const char *cost_table_path, const char *input_path, const char *out_path,
+                   const PeriodicOptions *periodic) {
     CostModel cost_model;
     if (cost_model_load(cost_table_path, &cost_model) != 0) {
         fprintf(stderr, "failed to load cost table: %s\n", cost_table_path);
@@ -127,6 +141,16 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
     FILE *out = fopen(out_path, "w");
     if (!out) {
         fprintf(stderr, "failed to open output file: %s\n", out_path);
+    } else if (periodic) {
+        /* Phase B: the same DSP initialization and body inside the periodic
+         * wrapper the ML path uses. */
+        PeriodicProgramCost cost;
+        rc = codegen_emit_periodic_program(&graph, &layout, &regalloc, &cost_model, input, input_len,
+                                           periodic, out, &cost);
+        fclose(out);
+        if (rc == 0) {
+            print_periodic_cost(periodic, &cost);
+        }
     } else {
         DspProgramCost cost;
         rc = codegen_emit_dsp_program(&graph, &layout, &regalloc, &cost_model, input, input_len, out, &cost);
@@ -258,18 +282,6 @@ int main(int argc, char **argv) {
     }
 
     int periodic_mode = periodic_count_seen || wait_policy_seen || timer_prescaler_seen;
-    if (dsp_mode) {
-        /* One workload per program: the DSP and ML paths share registers on the
-         * assumption that they are never lowered into the same program (see
-         * registers.h), so a model path is refused rather than ignored. */
-        if (model_path || use_real_candidates || periodic_mode) {
-            fprintf(stderr, "--dsp takes no model path, --optimized (the DSP path has no candidate "
-                            "diversity) or periodic flags\n");
-            usage(argv[0]);
-            return 2;
-        }
-        return run_dsp(cost_table_path, input_seen ? input_path : "models/dsp_demo_input.txt", out_path);
-    }
     if (periodic_mode && !(periodic_count_seen && wait_policy_seen && timer_prescaler_seen)) {
         usage(argv[0]);
         return 2;
@@ -278,6 +290,20 @@ int main(int argc, char **argv) {
     if (periodic_mode && periodic_options_validate(&periodic_options) != 0) {
         fprintf(stderr, "invalid periodic scheduling options\n");
         return 2;
+    }
+
+    if (dsp_mode) {
+        /* One workload per program: the DSP and ML paths share registers on the
+         * assumption that they are never lowered into the same program (see
+         * registers.h), so a model path is refused rather than ignored. */
+        if (model_path || use_real_candidates) {
+            fprintf(stderr, "--dsp takes no model path or --optimized (the DSP path has no candidate "
+                            "diversity)\n");
+            usage(argv[0]);
+            return 2;
+        }
+        return run_dsp(cost_table_path, input_seen ? input_path : "models/dsp_demo_input.txt", out_path,
+                       periodic_mode ? &periodic_options : NULL);
     }
 
     if (!model_path) {
@@ -354,15 +380,7 @@ int main(int argc, char **argv) {
     fclose(out);
 
     if (rc == 0 && periodic_mode) {
-        fprintf(stderr, "periodic policy: %s\n",
-                periodic_options.policy == WAIT_ACTIVE ? "active" : "powersave");
-        fprintf(stderr, "periodic timer prescaler: %u (Timer0 divisor)\n",
-                periodic_options.timer_prescaler);
-        fprintf(stderr, "periodic inference count: %u\n", periodic_options.inference_count);
-        fprintf(stderr, "periodic initialization predicted cost: %u cycles, %.3f nJ\n",
-                periodic_cost.initialization.cycles, periodic_cost.initialization.energy_nj);
-        fprintf(stderr, "periodic per-inference predicted compute cost: %u cycles, %.3f nJ\n",
-                periodic_cost.inference.cycles, periodic_cost.inference.energy_nj);
+        print_periodic_cost(&periodic_options, &periodic_cost);
     } else if (rc == 0) {
         fprintf(stderr, "prologue (const/input load): %u cycles, %.3f nJ (predicted)\n",
                 cost.prologue_cycles, cost.prologue_energy_nj);

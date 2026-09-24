@@ -151,6 +151,21 @@ int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
     return 0;
 }
 
+int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model,
+                               EmitUnit *unit, FILE *out) {
+    Candidate data;
+    if (lower_dsp_constant_data(graph, cost_model, &data) != 0) {
+        return -1;
+    }
+    int rc = 0;
+    if (data.num_instructions > 0) {
+        fprintf(out, "\n; ---- constant data (program memory, never executed) ----\n");
+        rc = emit_candidate(unit, &data, out);
+    }
+    candidate_free(&data);
+    return rc;
+}
+
 int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
                              const RegAllocResult *regalloc, const CostModel *cost_model,
                              const int8_t *input_bytes, size_t input_len,

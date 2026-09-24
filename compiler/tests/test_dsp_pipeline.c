@@ -23,6 +23,7 @@
 
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/lower.h"
+#include "optifine/codegen/periodic.h"
 #include "optifine/codegen/program.h"
 #include "optifine/codegen/regalloc.h"
 #include "optifine/codegen/sram_layout.h"
@@ -494,6 +495,170 @@ static void report_program(Fx *f) {
     free_parts(&p);
 }
 
+/* ---------------------------------------------------- Phase B periodic */
+
+/* Lines of `text` between two marker comments, instructions only (as
+ * instruction_lines keeps them), or of the whole text if a marker is NULL. */
+static char *region(const char *text, const char *from, const char *to) {
+    const char *a = from ? strstr(text, from) : text;
+    assert(a);
+    if (from) a = strchr(a, '\n') + 1;
+    const char *b = to ? strstr(a, to) : a + strlen(a);
+    assert(b);
+    char *cut = malloc((size_t)(b - a) + 1);
+    memcpy(cut, a, (size_t)(b - a));
+    cut[b - a] = 0;
+    char *lines = instruction_lines(cut);
+    free(cut);
+    return lines;
+}
+
+/* The periodic wrapper around the frozen DSP program (Tasks 11 and 14): the
+ * initialization, body and constant data it emits are the ordinary --dsp
+ * program's, instruction for instruction; the wrapper around them writes no
+ * register but r16 (which its interrupt handler saves) and stores only to the
+ * scheduler bytes or copies an output byte onto itself. */
+static void test_periodic_wrapper_keeps_the_program(Fx *f, const int8_t *input) {
+    FILE *ord = tmpfile();
+    DspProgramCost dcost;
+    assert(codegen_emit_dsp_program(&f->graph, &f->layout, &f->ra, &g_cm, input, N * 2, ord, &dcost) == 0);
+    char *ordinary = read_all(ord);
+    fclose(ord);
+    char *ord_init = region(ordinary, "_start:", "; ---- inference begins here ----");
+    char *ord_body = region(ordinary, "; ---- inference begins here ----", "; ---- program end");
+    char *ord_end = region(ordinary, "; ---- program end", NULL);
+    const char *ord_table = strstr(ord_end, ".Ltw:");
+    assert(ord_table && !strncmp(ord_end, "break\n", 6));
+
+    static const char *policy_name[] = {"active", "powersave"};
+    for (int pol = 0; pol < 2; pol++) {
+        PeriodicOptions opt = {pol ? WAIT_POWER_SAVE : WAIT_ACTIVE, 1024, 5, 0};
+        FILE *per = tmpfile();
+        PeriodicProgramCost pcost;
+        assert(codegen_emit_periodic_program(&f->graph, &f->layout, &f->ra, &g_cm, input, N * 2, &opt, per,
+                                             &pcost) == 0);
+        char *text = read_all(per);
+        fclose(per);
+        char *init = region(text, "; INITIALIZATION BEGIN", "; INITIALIZATION END");
+        char *body = region(text, "; BODY BEGIN", "; BODY END");
+        char *data = region(text, "; ---- constant data", NULL);
+        /* The ordinary body begins with the "inference begins" comment line
+         * the periodic body also carries; both are stripped as comments. */
+        assert(strcmp(init, ord_init) == 0);
+        assert(strcmp(body, ord_body) == 0);
+        assert(strcmp(data, ord_table) == 0);
+        assert(pcost.inference.cycles == dcost.body.cycles);           /* Window .. Output */
+        assert(pcost.initialization.cycles == dcost.initialization.cycles);
+
+        /* Wrapper instructions: everything outside init/body/data. */
+        uint16_t sched = pcost.tick_addr, out = addr_of(f, ROLE_OUTPUT);
+        char *pre = region(text, "_start:", "; INITIALIZATION BEGIN");
+        char *mid = region(text, "; INITIALIZATION END", "; BODY BEGIN");
+        char *post = region(text, "; BODY END", "; ---- constant data");
+        const char *parts[] = {pre, mid, post};
+        int stores = 0, copies = 0;
+        for (int k = 0; k < 3; k++) {
+            char prev_lds[64] = "";
+            for (char *l = (char *)parts[k]; *l;) {
+                char *e = strchr(l, '\n'); *e = 0;
+                char m[16] = "", a[40] = "", b[40] = "";
+                sscanf(l, "%15s %39[^,], %39s", m, a, b);
+                if (!strcmp(m, "sts")) {
+                    unsigned addr = (unsigned)strtoul(a, NULL, 16);
+                    int sched_byte = addr >= sched && addr < sched + 4u;
+                    int out_copy = addr >= out && addr < out + 16u && !strcmp(prev_lds, a);
+                    assert(sched_byte || out_copy);
+                    stores++; copies += out_copy;
+                } else if (!strcmp(m, "ldi") || !strcmp(m, "clr") || !strcmp(m, "lds") || !strcmp(m, "in") ||
+                           !strcmp(m, "inc") || !strcmp(m, "andi") || !strcmp(m, "pop") || !strcmp(m, "tst") ||
+                           !strcmp(m, "cpi") || !strcmp(m, "push")) {
+                    assert(!strcmp(a, "r16"));                          /* the only register touched */
+                }
+                snprintf(prev_lds, sizeof(prev_lds), "%s", !strcmp(m, "lds") ? b : "");
+                l = e + 1;
+            }
+        }
+        assert(copies == 16);                                            /* all 16 output bytes */
+        /* Stack: the ordinary program uses none; here only the timer ISR
+         * does. It pushes r16 and SREG, never re-enables interrupts (no
+         * nesting), and nothing calls, so the peak is 2 pushes + the 2-byte
+         * return address = 4 bytes at RAMEND. */
+        const char *isr = strstr(text, "timer0_ovf_isr:");
+        assert(isr);
+        int pushes = 0;
+        for (const char *q = isr; (q = strstr(q, "    push ")) != NULL; q++) pushes++;
+        assert(pushes == 2);
+        const char *reti = strstr(isr, "reti");
+        assert(reti);
+        char *isr_text = strndup(isr, (size_t)(reti - isr));
+        assert(strstr(isr_text, "sei") == NULL);
+        free(isr_text);
+        assert(strstr(text, "call ") == NULL);
+        printf("  periodic %-9s init/body/table == ordinary program; wrapper writes only r16, %d stores "
+               "(scheduler bytes + 16 output self-copies); stack peak 4 B (ISR only)\n", policy_name[pol], stores);
+        free(init); free(body); free(data); free(pre); free(mid); free(post); free(text);
+    }
+    free(ord_init); free(ord_body); free(ord_end); free(ordinary);
+}
+
+/* The body run the way the wrapper runs it: initialization once, then the
+ * body N+1 = 5 times, scratch poisoned before each. Every run must leave the
+ * frozen result, and the output must equal models/dsp_demo_golden_output.txt. */
+static void test_periodic_iterations_repeat_exactly(Fx *f, const int8_t *input, const int16_t *samples) {
+    uint16_t golden[K];
+    FILE *g = fopen("models/dsp_demo_golden_output.txt", "r");
+    assert(g);
+    char line[512];
+    int n = 0;
+    while (fgets(line, sizeof(line), g)) {
+        char *h = strchr(line, '#'); if (h) *h = 0;
+        char *c = line, *e;
+        for (long x; (x = strtol(c, &e, 10)), e != c; c = e) { assert(n < K); golden[n++] = (uint16_t)x; }
+    }
+    fclose(g);
+    assert(n == K);
+
+    Ref ref;
+    host_pipeline(samples, (const int16_t *)f->graph.ops[f->op_of[ROLE_CONST]].data, &ref);
+    assert(memcmp(ref.peak, golden, sizeof(golden)) == 0);            /* reference == golden file */
+
+    Parts p;
+    build_parts(f, input, N * 2, &p);
+    /* p: [clr r2, Input, Const, Window .. Output, end] */
+    Candidate init, body, end;
+    concat(p.part, 3, &init);
+    Candidate body_parts[16];
+    size_t nb = 0;
+    for (size_t i = 3; i + 1 < p.n; i++) body_parts[nb++] = p.part[i];
+    body_parts[nb++] = p.part[p.n - 1];                                  /* break + table, for lpm */
+    concat(body_parts, nb, &body);
+    (void)end;
+
+    AvrInterp *in = malloc(sizeof(AvrInterp));
+    avr_interp_init(in);
+    poison(in->mem, 0x77);
+    assert(avr_interp_run(in, &init) == 0);
+    static uint8_t first[AVR_INTERP_MEM_SIZE];
+    uint32_t lo = SRAM_LAYOUT_BASE, hi = f->layout.dsp_scratch_addr;
+    unsigned long counts[ROLE_COUNT] = {0};
+    for (int it = 0; it < 5; it++) {
+        for (int b = 0; b < DSP_SCRATCH_BYTES; b++) in->mem[hi + b] = (uint8_t)(0x13 * it + 7 * b + 1);
+        unsigned long c0 = in->cycles;
+        assert(avr_interp_run(in, &body) == 0);
+        assert(in->cycles - c0 == body.cycles);
+        assert(check_buffers(f, in->mem, &ref, counts) == 0);
+        for (int k = 0; k < K; k++) assert((uint16_t)rd16(in->mem, addr_of(f, ROLE_OUTPUT) + 2 * k) == golden[k]);
+        if (it == 0) memcpy(first, in->mem, sizeof(first));
+        assert(memcmp(in->mem + lo, first + lo, hi - lo) == 0);        /* iteration-invariant */
+    }
+    printf("  periodic body x5 after one initialization: every graph buffer and all 16 output bytes equal the "
+           "frozen result and the golden file each time (%u cycles per body incl. break)\n", body.cycles);
+    free(in);
+    free(init.instructions);
+    free(body.instructions);
+    free_parts(&p);
+}
+
 int main(void) {
     const char *p = getenv("OPTIFINE_COST_TABLE");
     assert(cost_model_load(p ? p : "cost_table.toml", &g_cm) == 0);
@@ -503,6 +668,8 @@ int main(void) {
     to_bytes(g_vec[g_nvec - 1], demo);
     test_production_program(&f, demo);
     test_vectors(&f);
+    test_periodic_wrapper_keeps_the_program(&f, demo);
+    test_periodic_iterations_repeat_exactly(&f, demo, g_vec[g_nvec - 1]);
     report_program(&f);
     fx_free(&f);
     printf("test_dsp_pipeline: all tests passed\n");

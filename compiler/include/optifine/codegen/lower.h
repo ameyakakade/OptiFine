@@ -77,6 +77,13 @@ int lower_fft_stage0_test_hook(const IrGraph *graph, size_t op_id,
  * per assembly unit (EmitUnit refuses a second .Ltw). */
 int lower_dsp_program_end(const IrGraph *graph, const CostModel *cost_model, Candidate *out);
 
+/* Just the program-memory constant data lower_dsp_program_end places after its
+ * break -- the twiddle table if the graph has FFT stages, otherwise an empty
+ * candidate -- for a program whose terminating code is written elsewhere (the
+ * Phase B periodic wrapper). The caller must place it where control flow
+ * cannot reach it. */
+int lower_dsp_constant_data(const IrGraph *graph, const CostModel *cost_model, Candidate *out);
+
 /* FFT stages first_stage..last_stage (0-based, inclusive) followed by break
  * and the twiddle table, as one self-contained program. */
 int lower_fft_stages_test_hook(const IrGraph *graph, int first_stage, int last_stage,
