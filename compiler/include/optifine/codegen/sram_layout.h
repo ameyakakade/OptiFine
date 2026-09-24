@@ -29,8 +29,10 @@
  * lifetimes overlap. Any op may therefore use any arena cell, provided it
  * reads a cell only after writing it itself: then no value crosses an op
  * boundary through scratch, and results cross only through graph tensors.
- * test_asm_unit checks that rule over every lowered DSP op's code, and that no
- * data pointer is aimed into the arena. Ranges of different ops may alias;
+ * test_asm_unit checks that rule over every lowered DSP op's absolute
+ * accesses, and that no data pointer is aimed into the arena except
+ * PeakExtract's selected[] pointer (whose op-local init is checked by
+ * test_dsp_peak running under different scratch poison). Ranges of different ops may alias;
  * the arena must cover the largest single op's extent, never the sum.
  *
  * Ownership, as offsets into the arena:
@@ -38,15 +40,20 @@
  *                     180   block counter        (DSP_SCRATCH_FFT_OUTER_COUNT)
  *   OP_MAGNITUDE      0     element counter      (DSP_SCRATCH_MAG_COUNT),
  *                           aliasing BF_AC across the op boundary
- *   OP_PEAK_EXTRACT   not implemented; the milestone plan's layout reaches 179
+ *   OP_PEAK_EXTRACT   0-63  selected[] (DSP_SCRATCH_PK_SELECTED), zeroed on
+ *                           entry by the op itself; read and written through
+ *                           X, so test_asm_unit allows this one pointer into
+ *                           the arena and test_dsp_peak checks poison
+ *                           invariance instead
  *   Window, BitReverse, Input, Const, Output: none
  *
  * 181 is the FFT's extent: its block counter was put at 180, past the old
  * plan's map, before this lifetime rule was written down. It stays there so
  * the FFT's code and fixtures are unchanged; the most any op touches at once
- * is 27 bytes (the FFT's 26 cells plus its counter). */
+ * is 64 bytes (PeakExtract's selected[]). */
 #define DSP_SCRATCH_FFT_OUTER_COUNT 180 /* 1 byte: remaining blocks in one FFT stage */
 #define DSP_SCRATCH_MAG_COUNT 0         /* 1 byte: remaining bins in OP_MAGNITUDE */
+#define DSP_SCRATCH_PK_SELECTED 0       /* n bytes: OP_PEAK_EXTRACT's selected[] */
 #define DSP_SCRATCH_BYTES 181
 
 typedef struct {

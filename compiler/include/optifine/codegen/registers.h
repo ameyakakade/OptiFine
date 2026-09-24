@@ -121,4 +121,31 @@ extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
  * the SRAM outer-counter close, both of which go through REG_SCRATCH0. */
 #define REG_DSP_MASK 25
 
+/* OP_PEAK_EXTRACT (lower.c) does no 32-bit arithmetic and no multiply, so it
+ * owns these as plain bytes for its duration -- the same caller-owned use of
+ * the DSP32 quads and the 16-bit window every DSP op makes, never live across
+ * an op boundary:
+ *   r4:r5  best value this pass      r16:r17  candidate value
+ *   r6     best index this pass      r18      candidate's selected[] byte
+ *   r7     found (0x00 / 0xFF)       r19      eligible mask
+ *   r8     pass counter (k..1)       r20      candidate index
+ *                                    r21      "better" mask
+ *                                    r22      select temporary
+ *                                    r23      constant 0xFF
+ * r3 is the candidate loop's counter (and the selected[] clearing loop's
+ * before it), r2 is read as zero, X/Y/Z are selected[] / output / input. */
+#define REG_PK_BEST_LO 4
+#define REG_PK_BEST_HI 5
+#define REG_PK_BEST_IDX 6
+#define REG_PK_FOUND 7
+#define REG_PK_PASS 8
+#define REG_PK_V_LO 16
+#define REG_PK_V_HI 17
+#define REG_PK_SEL 18
+#define REG_PK_ELIGIBLE 19
+#define REG_PK_IDX 20
+#define REG_PK_BETTER 21
+#define REG_PK_TMP 22
+#define REG_PK_ONES 23
+
 #endif /* OPTIFINE_CODEGEN_REGISTERS_H */

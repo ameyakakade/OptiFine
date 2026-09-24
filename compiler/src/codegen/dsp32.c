@@ -148,6 +148,31 @@ void dsp8_ge_mask(InstrBuf *b, int mask_reg) {
     ins1(b, "com", m);    /* 0xFF if a >= b */
 }
 
+void dsp16_gt_mask(InstrBuf *b, int mask_reg, int a_lo, int a_hi, int b_lo, int b_hi) {
+    char m[AVR_OPERAND_LEN], x[AVR_OPERAND_LEN], y[AVR_OPERAND_LEN];
+    reg(m, mask_reg);
+    reg(x, b_lo); reg(y, a_lo); ins2(b, "cp", x, y);   /* b - a: borrows iff a > b */
+    reg(x, b_hi); reg(y, a_hi); ins2(b, "cpc", x, y);
+    ins2(b, "sbc", m, m);
+}
+
+void dsp8_zero_mask(InstrBuf *b, int mask_reg, int r) {
+    char m[AVR_OPERAND_LEN], z[AVR_OPERAND_LEN], x[AVR_OPERAND_LEN];
+    reg(m, mask_reg); reg(z, REG_ZERO); reg(x, r);
+    ins2(b, "cp", z, x);   /* 0 - r: borrows iff r != 0 */
+    ins2(b, "sbc", m, m);  /* 0xFF iff r != 0 */
+    ins1(b, "com", m);     /* 0xFF iff r == 0 */
+}
+
+void dsp8_select(InstrBuf *b, int dst, int src, int mask_reg, int tmp_reg) {
+    char d[AVR_OPERAND_LEN], s[AVR_OPERAND_LEN], m[AVR_OPERAND_LEN], t[AVR_OPERAND_LEN];
+    reg(d, dst); reg(s, src); reg(m, mask_reg); reg(t, tmp_reg);
+    ins2(b, "mov", t, d);
+    ins2(b, "eor", t, s);
+    ins2(b, "and", t, m);
+    ins2(b, "eor", d, t);
+}
+
 void dsp32_isqrt(InstrBuf *b, int num, int res, int bit, int tmp, int mask_reg, int counter_reg) {
     assert(num != res && num != bit && num != tmp && res != bit && res != tmp && bit != tmp);
     dsp32_clear(b, res);

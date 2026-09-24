@@ -505,6 +505,66 @@ static void test_isqrt_building_blocks(void) {
     assert(REG_DSP_MASK != REG_SCRATCH0 && REG_DSP_MASK >= 16);
 }
 
+/* PeakExtract's mask primitives. The compare must be UNSIGNED: Magnitude's
+ * values reach 46340, and 0x8000 read as signed would sort below 0x7FFF. */
+static void test_peak_mask_primitives(void) {
+    static const uint16_t kB16[] = {0, 1, 2, 0x00FF, 0x0100, 0x7FFE, 32767, 32768, 32769,
+                                    46340, 0xFF00, 0xFFFE, 65534, 65535};
+    const size_t nb = sizeof(kB16) / sizeof(kB16[0]);
+    size_t pairs = 0;
+    for (size_t i = 0; i < nb + 40; i++) {
+        uint16_t a = i < nb ? kB16[i] : (uint16_t)rng();
+        for (size_t j = 0; j < nb + 8; j++, pairs++) {
+            uint16_t bv = j < nb ? kB16[j] : (uint16_t)rng();
+            InstrBuf b; instrbuf_init(&b);
+            set_carry_via_mul(&b, (uint8_t)(pairs & 1 ? 0xFF : 0x01));   /* incoming C must not matter */
+            dsp16_load(&b, REG_DSP_OP_A_LO, REG_DSP_OP_A_HI, A_ADDR);
+            dsp16_load(&b, REG_DSP_OP_B_LO, REG_DSP_OP_B_HI, B_ADDR);
+            dsp16_gt_mask(&b, REG_DSP_MASK, REG_DSP_OP_A_LO, REG_DSP_OP_A_HI,
+                          REG_DSP_OP_B_LO, REG_DSP_OP_B_HI);
+            char m[AVR_OPERAND_LEN], a0[AVR_OPERAND_LEN];
+            fmt_reg(m, REG_DSP_MASK); fmt_addr(a0, R_ADDR);
+            ins2(&b, "sts", a0, m);
+            uint32_t got = run(&b, a, bv, NULL) & 0xFF;
+            assert(got == (a > bv ? 0xFFu : 0x00u));
+        }
+    }
+    printf("  dsp16_gt_mask: %zu unsigned pairs exact (incl. 32767/32768, 65534/65535)\n", pairs);
+
+    for (int v = 0; v < 256; v++) {
+        InstrBuf b; instrbuf_init(&b);
+        char r[AVR_OPERAND_LEN], a0[AVR_OPERAND_LEN], m[AVR_OPERAND_LEN];
+        fmt_reg(r, REG_DSP_OP_A_LO); fmt_addr(a0, A_ADDR); ins2(&b, "lds", r, a0);
+        dsp8_zero_mask(&b, REG_DSP_MASK, REG_DSP_OP_A_LO);
+        fmt_reg(m, REG_DSP_MASK); fmt_addr(a0, R_ADDR); ins2(&b, "sts", a0, m);
+        assert((run(&b, (uint32_t)v, 0, NULL) & 0xFF) == (v == 0 ? 0xFFu : 0x00u));
+    }
+    for (int mask = 0; mask < 2; mask++) {
+        for (int k = 0; k < 64; k++) {
+            uint8_t d = (uint8_t)rng(), src = (uint8_t)rng();
+            InstrBuf b; instrbuf_init(&b);
+            char r[AVR_OPERAND_LEN], imm[AVR_OPERAND_LEN], a0[AVR_OPERAND_LEN];
+            fmt_reg(r, REG_DSP_OP_A_LO); fmt_imm(imm, d); ins2(&b, "ldi", r, imm);
+            fmt_reg(r, REG_DSP_OP_A_HI); fmt_imm(imm, src); ins2(&b, "ldi", r, imm);
+            fmt_reg(r, REG_DSP_MASK); fmt_imm(imm, mask ? 0xFF : 0x00); ins2(&b, "ldi", r, imm);
+            dsp8_select(&b, REG_DSP_OP_A_LO, REG_DSP_OP_A_HI, REG_DSP_MASK, REG_DSP_OP_B_LO);
+            fmt_reg(r, REG_DSP_OP_A_LO); fmt_addr(a0, R_ADDR); ins2(&b, "sts", a0, r);
+            assert((run(&b, 0, 0, NULL) & 0xFF) == (mask ? src : d));
+        }
+    }
+    printf("  dsp8_zero_mask: all 256 bytes exact; dsp8_select: 128 cases exact\n");
+
+    const int mask_only[] = {REG_DSP_MASK};
+    const int sel_set[] = {REG_DSP_OP_A_LO, REG_DSP_OP_B_LO};
+    InstrBuf b; instrbuf_init(&b);
+    dsp16_gt_mask(&b, REG_DSP_MASK, REG_DSP_OP_A_LO, REG_DSP_OP_A_HI, REG_DSP_OP_B_LO, REG_DSP_OP_B_HI);
+    check_footprint("gt_mask16", &b, mask_only, 1);
+    instrbuf_init(&b); dsp8_zero_mask(&b, REG_DSP_MASK, REG_DSP_OP_A_LO);
+    check_footprint("zero_mask8", &b, mask_only, 1);
+    instrbuf_init(&b); dsp8_select(&b, REG_DSP_OP_A_LO, REG_DSP_OP_A_HI, REG_DSP_MASK, REG_DSP_OP_B_LO);
+    check_footprint("select8", &b, sel_set, 2);
+}
+
 static void test_cycle_prediction_matches_interpreter(void) {
     /* The cost model must agree with what actually executes. The interpreter
      * counts real steps, so compare against a hand-derived cycle total. */
@@ -531,6 +591,7 @@ int main(void) {
     test_no_helper_depends_on_mul_carry();
     test_register_footprints();
     test_isqrt_building_blocks();
+    test_peak_mask_primitives();
     test_cycle_prediction_matches_interpreter();
     printf("test_dsp32: all tests passed\n");
     return 0;

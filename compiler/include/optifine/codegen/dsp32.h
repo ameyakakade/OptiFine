@@ -76,6 +76,25 @@ void dsp32_and_mask(InstrBuf *b, int quad, int mask_reg);
  * follow it with nothing in between. Clobbers: mask_reg. */
 void dsp8_ge_mask(InstrBuf *b, int mask_reg);
 
+/* --- 8/16-bit mask primitives (PeakExtract) ---
+ *
+ * Each produces a whole-byte mask, 0xFF for true and 0x00 for false, from a
+ * compare it performs itself -- none reads a flag set before it -- so a data
+ * decision becomes and/eor arithmetic instead of a branch. */
+
+/* mask = 0xFF if (a_hi:a_lo) > (b_hi:b_lo) as UNSIGNED 16-bit, else 0x00.
+ * cp/cpc compute b - a for its borrow only; sbc turns the borrow into the
+ * mask. Unsigned throughout: 0x8000 > 0x7FFF. Clobbers: mask_reg. */
+void dsp16_gt_mask(InstrBuf *b, int mask_reg, int a_lo, int a_hi, int b_lo, int b_hi);
+
+/* mask = 0xFF if reg == 0, else 0x00: cp REG_ZERO,reg borrows exactly when
+ * reg != 0. Needs REG_ZERO to hold zero. Clobbers: mask_reg. */
+void dsp8_zero_mask(InstrBuf *b, int mask_reg, int reg);
+
+/* dst = mask ? src : dst, as dst ^= (dst ^ src) & mask. Clobbers: dst,
+ * tmp_reg. mask must be 0x00 or 0xFF. */
+void dsp8_select(InstrBuf *b, int dst, int src, int mask_reg, int tmp_reg);
+
 /* res = floor(sqrt(num)), unsigned 32-bit num, exact over all of uint32.
  *
  * Bit-by-bit restoring square root with a FIXED 16 iterations (one per result

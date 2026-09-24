@@ -1,5 +1,6 @@
 /* One assembly unit built from several loop-generating DSP ops (the six FFT
- * stages and Magnitude, which nests isqrt's loop inside its own), each lowered
+ * stages, Magnitude, which nests isqrt's loop inside its own, and PeakExtract,
+ * with three loops), each lowered
  * through the real lower_op path and therefore each numbering its own loops
  * from .Ldsp0. Before EmitUnit, concatenating them produced duplicate labels
  * that avr-as rejects; this pins that every label in the unit is defined
@@ -48,10 +49,10 @@ static void build_unit(Unit *u) {
     u->cycles = 0;
     for (size_t i = 0; i < g.count; i++) {
         OpKind k = g.ops[i].kind;
-        if (k != OP_FFT_BUTTERFLY && k != OP_MAGNITUDE) continue;
+        if (k != OP_FFT_BUTTERFLY && k != OP_MAGNITUDE && k != OP_PEAK_EXTRACT) continue;
         assert(u->count < MAX_PARTS);
         assert(lower_op(&g, i, &l, &ra, &g_cm, NULL, 0, &u->parts[u->count]) == 0);
-        u->names[u->count] = k == OP_FFT_BUTTERFLY ? "fft stage" : "magnitude";
+        u->names[u->count] = k == OP_FFT_BUTTERFLY ? "fft stage" : k == OP_MAGNITUDE ? "magnitude" : "peak extract";
         u->cycles += u->parts[u->count].cycles;
         u->count++;
     }
@@ -209,7 +210,8 @@ static void test_scratch_is_op_local(void) {
     int ops = 0;
     for (size_t i = 0; i < g.count; i++) {
         OpKind k = g.ops[i].kind;
-        if (k != OP_WINDOW && k != OP_BIT_REVERSE && k != OP_FFT_BUTTERFLY && k != OP_MAGNITUDE) continue;
+        if (k != OP_WINDOW && k != OP_BIT_REVERSE && k != OP_FFT_BUTTERFLY && k != OP_MAGNITUDE &&
+            k != OP_PEAK_EXTRACT) continue;
         Candidate c;
         assert(lower_op(&g, i, &l, &ra, &g_cm, NULL, 0, &c) == 0);
         static uint8_t written[AVR_OPERAND_LEN * 64];
@@ -235,18 +237,23 @@ static void test_scratch_is_op_local(void) {
                 if (r == 26 || r == 28 || r == 30) ptr_lo[r] = v;
                 if ((r == 27 || r == 29 || r == 31) && ptr_lo[r - 1] >= 0) {
                     uint32_t a = (uint32_t)(ptr_lo[r - 1] | (v << 8));
-                    assert(a < lo || a >= hi);
+                    /* The one sanctioned exception: PeakExtract's X walks its
+                     * own selected[], which it zeroes on entry. */
+                    int sanctioned = k == OP_PEAK_EXTRACT && r == 27 &&
+                                     a == lo + DSP_SCRATCH_PK_SELECTED;
+                    assert(sanctioned || a < lo || a >= hi);
                     ptr_lo[r - 1] = -1;
                 }
             }
         }
         printf("  op %2zu (%s): %d scratch bytes, each written before read\n", i,
                k == OP_WINDOW ? "window" : k == OP_BIT_REVERSE ? "bitreverse"
-               : k == OP_FFT_BUTTERFLY ? "fft stage" : "magnitude", touched);
+               : k == OP_FFT_BUTTERFLY ? "fft stage" : k == OP_MAGNITUDE ? "magnitude"
+               : "peak extract", touched);
         candidate_free(&c);
         ops++;
     }
-    assert(ops == 9);
+    assert(ops == 10);
     regalloc_result_free(&ra);
     sram_layout_free(&l);
     ir_graph_free(&g);
