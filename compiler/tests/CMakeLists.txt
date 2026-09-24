@@ -359,6 +359,34 @@ endif()
 add_test(NAME test_dsp_peak COMMAND test_dsp_peak
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)
 
+add_executable(test_dsp_pipeline test_dsp_pipeline.c
+    avr_interp.c
+    ${CMAKE_SOURCE_DIR}/src/ir.c
+    ${CMAKE_SOURCE_DIR}/src/dsp_build.c
+    ${CMAKE_SOURCE_DIR}/src/cost_model.c
+    ${CMAKE_SOURCE_DIR}/src/emit.c
+    ${CMAKE_SOURCE_DIR}/src/locality.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/cost_category.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/instr_buf.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/registers.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/sram_layout.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/lower.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/dsp32.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/candidates.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/regalloc.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/select.c
+    ${CMAKE_SOURCE_DIR}/src/codegen/program.c
+)
+target_include_directories(test_dsp_pipeline PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_dsp_pipeline PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+if(UNIX)
+    target_link_libraries(test_dsp_pipeline PRIVATE m)
+endif()
+add_test(NAME test_dsp_pipeline COMMAND test_dsp_pipeline
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)
+
 add_executable(test_dsp_cli test_dsp_cli.c)
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     target_compile_definitions(test_dsp_cli PRIVATE _CRT_SECURE_NO_WARNINGS)
