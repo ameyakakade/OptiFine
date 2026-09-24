@@ -21,3 +21,11 @@
 cost_table.toml text eol=crlf
 models/tiny_classifier_golden_input.txt text eol=crlf
 models/tiny_classifier_golden_output.txt text eol=crlf
+
+# Recorded input and retained artifacts of the canonical DSP baseline. Their
+# SHA-256s in sim/fixtures/dsp/manifest.json were taken over LF bytes; pinning
+# the checkout ending keeps `python3 sim/run_dsp.py check` true on every OS,
+# the same reason the Phase B inputs above are pinned to the ending they were
+# hashed with.
+models/dsp_demo_input.txt text eol=lf
+sim/fixtures/dsp/* text eol=lf
