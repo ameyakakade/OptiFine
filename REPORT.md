@@ -6,14 +6,13 @@ sleep scheduling) are done and produce the simulated numbers below, from
 the actual compiler running the actual `tiny_classifier.onnx` model
 through real Avrora.
 
-**Milestone 6 (the DSP path) is in progress and its lowering is
-incomplete**: the 64-point Q15 pipeline's IR is fully built, and 4 of its
-13 graph ops lower to AVR (`Input`, `Const`, `Window`, `Output`), but
-`BitReverse`, the six `FftButterfly` stages, `Magnitude` and
-`PeakExtract` are not yet lowered. The DSP pipeline therefore does not
-compile end-to-end, has never been run through Avrora, and **no DSP
-cycle, energy or flash figure is reported anywhere in this document**.
-Every result below is from the ML workload.
+**Milestone 6 (the DSP path) compiles end to end**: `optifine --dsp`
+lowers the complete 64-point Q15 pipeline into one AVR program, which
+Avrora runs in exactly the 148,335 cycles the compiler predicts, and
+whose every intermediate buffer matches an independent integer host
+reference. Its results are in "Milestone 6: the DSP workload" below.
+Phase B's sleep scheduling has so far been run on the ML workload only;
+extending it to the DSP pipeline is milestone 6's remaining goal.
 
 Every figure in this report is regenerated from raw Avrora output by
 `python3 sim/report_results.py`, not transcribed by hand.
@@ -58,8 +57,10 @@ instruction-level optimization being observable at all.
 The same backend targets two structurally different workload classes —
 INT8 neural-network inference and a fixed-point streaming DSP pipeline
 (64-point FFT, Q15) — so the result can be tested against computational
-shape rather than a single benchmark. The DSP path is currently in
-implementation; all figures reported above are from the ML workload.
+shape rather than a single benchmark. The complete DSP pipeline compiles
+to a 12,800-byte ATmega128 program whose simulated cycle count the
+compiler predicts exactly; the sleep-scheduling figures above are from
+the ML workload, and the DSP pipeline has not yet been run under them.
 
 This is a structural argument about the generality of a claim, not a
 competing measurement: it is established in a cycle-accurate simulator,
@@ -388,6 +389,169 @@ and how it relates to prior compiler-directed sleep-scheduling and
 instruction-level-energy work, is in `documents/LITERATURE_SURVEY.md`
 section 1.
 
+## Milestone 6: the DSP workload
+
+The second workload is a fixed audio-style pipeline built directly as IR
+(`compiler/src/dsp_build.c`) rather than ingested: 64 Q15 samples, a Hamming
+window, a 64-point FFT, per-bin magnitude and peak selection.
+`optifine --dsp` compiles it (README, "Compile the DSP pipeline"). The
+figures in this section are derived from the retained raw run in
+`sim/fixtures/dsp/` by `sim/report_results.py` (generated table:
+`sim/fixtures/dsp/results.md`; verify with `python3 sim/run_dsp.py check`).
+
+### Why the DSP lowering uses loops
+
+The milestone's original design lowered every op fully unrolled, as the ML
+path does. A pre-flight flash model -- checked against real `avr-size`
+output for the Window op (4,608 B predicted, 4,608 B linked) -- projected the
+unrolled pipeline at about 497 KB, roughly 379% of the ATmega128's 128 KiB
+flash. That was a code-representation problem, not a workload problem, so the
+workload was kept and the representation changed: each repeated structure is
+emitted once inside a statically bounded counted loop. The trip counts are
+compile-time constants, so pricing stays exact: the cost model records each
+loop's region and trip count and charges every instruction by how often it
+executes, including the one-time fall-through of the closing branch.
+
+Supporting backend work, each validated against Avrora before use:
+
+- labels and counted-loop closure in two forms -- `dec / brne` when the body
+  is within BRNE's 64-word reach, and `dec / breq exit / rjmp head` beyond
+  it -- with the form recorded per loop and priced exactly;
+- the FFT's 32 unique Q15 twiddles as a 128-byte program-memory table read
+  with `lpm Z+`, placed after the program's only `break` (below 0x10000, so
+  no ELPM/RAMPZ);
+- a DSP scratch arena used as a lifetime overlay: ops run once each in
+  sequence, so every op may reuse any cell provided it writes before it
+  reads, which a test checks over every op's code;
+- one label namespace per emitted assembly file, so several looping ops
+  can share a program.
+
+The result is the whole pipeline in 12,800 B of flash with exact semantics
+and zero cycle-prediction error, against a projection that could not fit.
+The 497 KB figure is the pre-redesign projection that motivated this change,
+not a measurement of anything that was built.
+
+### Pipeline and semantics
+
+`Input -> Const (Hamming coefficients) -> Window -> BitReverse -> FFT x6 ->
+Magnitude -> PeakExtract -> Output`.
+
+- **Window**: per-sample Q15 product `floor(x * c / 32768)` with the
+  coefficients baked in at compile time.
+- **BitReverse**: the 6-bit bit-reversal permutation into a complex buffer
+  (imaginary parts zero), ahead of the stages.
+- **FFT**: N = 64, radix-2 decimation-in-time, forward transform,
+  `W^k = exp(-2*pi*i*k/64)`. Each stage halves its operands before
+  combining them (`p/2 +/- t/2`, arithmetic shift), so scaling is 1/2 per
+  stage and 1/64 overall and no intermediate overflows int16. Stage 0 is one
+  loop of 32 butterflies; stages 1-5 are a block loop around a butterfly
+  loop. 4,230 B of code.
+- **Magnitude**: exact `floor(sqrt(re^2 + im^2))` per bin, the squares and
+  their sum in 32 bits (the sum reaches 2^31, so it is unsigned), and a
+  fixed 16-iteration bit-by-bit integer square root with masks in place of
+  data-dependent branches. The result is an unsigned 16-bit value in Q15
+  units stored in the op's `FIXED_Q15[64]` tensor; over arbitrary complex
+  Q15 input it reaches 46,340. Behind the Hamming window it provably stays
+  below 17,474 (sum of coefficients / 64, plus at most 15 of rounding over
+  six stages). 246 B of code.
+- **PeakExtract**: the 8 largest magnitudes, largest first, compared
+  unsigned. Output is the eight values only, not bin positions (the IR
+  output is `FIXED_Q15[8]`). Each pass excludes earlier winners through an
+  explicit `selected[64]` table the op zeroes itself, and ties go to the
+  lower bin index, so every value comes from a distinct bin even when
+  values repeat or are all zero. Decisions are masks, not branches. 128 B
+  of code.
+
+### Correctness
+
+The complete program was run in the test interpreter on 18 inputs (zeros,
+impulses, two DC levels, tones at bins 1, 5, 23 and 31, alternating int16
+extremes, a mixed ramp, a negative-heavy signal, Q15 boundary values, four
+fixed-seed random signals and the demo input). Every graph buffer -- window
+output, bit-reversed buffer, all six FFT stages, magnitudes, peaks and the 16
+output bytes -- equals an independent host reference exactly (integer Q15
+arithmetic, a textbook-indexed FFT, integer square root, a sort for the
+peaks). Each run is repeated under different SRAM poison, and op by op with
+the scratch arena re-poisoned between ops, with identical results and no
+write outside the graph tensors and scratch arena (`test_dsp_pipeline`). The
+interpreted instruction stream is checked to be exactly the one
+`optifine --dsp` writes.
+
+### Results
+
+Avrora simulation of the `optifine --dsp` program on the default demo input
+(ATmega128, 8 MHz):
+
+| metric | DSP pipeline |
+|---|---:|
+| Cycles (Avrora) | 148,335 |
+| Cycles (compiler prediction) | 148,335 |
+| Cycle-prediction error | 0 |
+| Time @ 8 MHz | 18.542 ms |
+| Simulated active energy (Avrora) | 420,902.42 nJ (420.90 µJ) |
+| Linked flash (.text; .data and .bss are 0) | 12,800 B (9.8% of 128 KiB) |
+| SRAM (graph tensors + scratch arena) | 2,517 B (61.5% of 4,096 B; 1,579 B free) |
+
+Time is the cycle count divided by the 8 MHz clock, not a wall-clock
+measurement. The energy is Avrora's own report, 2.8375125 nJ per Active cycle
+exactly as for the ML path. The compiler's printed estimate, 420,900.56 nJ,
+prices the same cycles at `cost_table.toml`'s rounded 2.8375 nJ/cycle; the
+table is pinned by Phase B's manifest and was not changed. The cycle count
+does not depend on the input samples: every data decision is a mask, and
+only loop control branches.
+
+Where the cycles and the flash go (compiler prediction per op, which sums
+to the Avrora total):
+
+| part | cycles | % | code bytes |
+|---|---:|---:|---:|
+| Setup: `clr r2`, embedded input, window coefficients | 769 | 0.52% | 1,538 |
+| Window | 2,560 | 1.73% | 4,608 |
+| BitReverse | 896 | 0.60% | 1,792 |
+| FFT, six stages | 73,512 | 49.56% | 4,230 |
+| Magnitude | 51,590 | 34.78% | 246 |
+| PeakExtract | 18,943 | 12.77% | 128 |
+| Output | 64 | 0.04% | 128 |
+| `break` + twiddle table | 1 | 0.00% | 2 + 128 |
+| **total** | **148,335** | | **12,800** |
+
+The setup row is part of the program, not a harness: like the ML build's
+demo input, the samples and coefficients are embedded at compile time.
+(Isolated FFT fixtures elsewhere in the test suite report 73,513 cycles
+because they include their own `break`; inside the complete program the
+FFT's six stages cost 73,512.) FFT and Magnitude are 84% of the cycles;
+Window, still fully unrolled, is 36% of the flash.
+
+SRAM is 2,336 B of graph tensors (one buffer per op, none reused) plus a
+181-byte scratch arena. The arena is an overlay across op lifetimes, so the
+most any op holds at once is 64 B (PeakExtract's `selected[]`); per-op
+scratch is not additive. The program uses no stack.
+
+The two workloads side by side (they compute different things, so this
+shows the backend's breadth rather than comparing the algorithms' efficiency):
+
+| | ML classifier (optimized) | DSP pipeline |
+|---|---:|---:|
+| Cycles | 6,018 | 148,335 |
+| Time @ 8 MHz | 0.752 ms | 18.542 ms |
+| Simulated active energy | 17,076.15 nJ | 420,902.42 nJ |
+| Linked flash | 11,524 B | 12,800 B |
+
+(ML flash is `avr-size` of the current `--optimized` build.)
+
+The DSP path has one lowering per op, so there is no naive-versus-optimized
+pair as on the ML path: under a single per-cycle energy constant the two
+would select the same code (Phase A's finding), and the milestone's design
+chose to spend the effort on Phase B instead.
+
+### Not yet done: the DSP pipeline under Phase B
+
+The milestone's design (`docs/superpowers/specs/2026-08-02-milestone-6-dsp-path-design.md`,
+Goals) includes wrapping the DSP pipeline in Phase B's periodic
+busy-wait/Power-save harness for a second energy-delta data point. That has
+not been built: `--dsp` refuses the periodic flags, and every Phase B figure
+in this report is from the ML classifier.
+
 ## Limitations
 
 - **Demo input is fixed and compile-time-baked**, not live sensor data
@@ -449,6 +613,17 @@ section 1.
   (`saving ~= 0.984 x idle_fraction`, `documents/LITERATURE_SURVEY.md`
   section 1.3) is specific to this project's calibrated
   active/Power-save current ratio.
+- **The DSP figures are simulated, like everything else here.** The
+  generated program executes correctly and its cycle count is predicted
+  exactly, but only in Avrora and the test interpreter; no ATmega128 board
+  has run it.
+- **One DSP input is simulated in Avrora.** The 18-input correctness sweep
+  runs in the test interpreter; Avrora reproduces the cycle count, which
+  does not depend on the samples, for the demo input.
+- **The DSP pipeline has no Phase B result yet** (see "Not yet done" above),
+  and no DSP candidate diversity: each op has one lowering.
+- **PeakExtract reports magnitudes, not bin positions.** Reporting positions
+  would need a wider or second output tensor, an IR change not made here.
 - **`sim/run_phase_b.py`'s reproduction path hard-gates on a recorded
   `avr-gcc` binary SHA-256**, which will legitimately differ on any
   machine other than the one that generated `manifest.json` (confirmed:
