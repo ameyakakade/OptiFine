@@ -150,3 +150,31 @@ int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
     emit_program_epilogue(out);
     return 0;
 }
+
+int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
+                             const RegAllocResult *regalloc, const CostModel *cost_model,
+                             const int8_t *input_bytes, size_t input_len,
+                             FILE *out, DspProgramCost *out_cost) {
+    ProgramRegionCost zero = {0};
+    out_cost->initialization = zero;
+    out_cost->body = zero;
+    out_cost->termination = zero;
+
+    EmitUnit unit;
+    emit_unit_init(&unit);
+    emit_program_prologue(out);
+    if (codegen_emit_initialization(graph, layout, regalloc, cost_model, input_bytes, input_len, 0,
+                                    &unit, out, &out_cost->initialization) != 0) {
+        return -1;
+    }
+    if (codegen_emit_inference_body(graph, layout, regalloc, cost_model, input_bytes, input_len, 0,
+                                    &unit, out, &out_cost->body) != 0) {
+        return -1;
+    }
+    Candidate end;
+    if (lower_dsp_program_end(graph, cost_model, &end) != 0) {
+        return -1;
+    }
+    fprintf(out, "\n    ; ---- program end: break, then constant data ----\n");
+    return emit_best(&end, 1, &unit, out, &out_cost->termination.energy_nj, &out_cost->termination.cycles);
+}

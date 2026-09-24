@@ -358,3 +358,13 @@ if(UNIX)
 endif()
 add_test(NAME test_dsp_peak COMMAND test_dsp_peak
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)
+
+add_executable(test_dsp_cli test_dsp_cli.c)
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(test_dsp_cli PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+add_test(NAME test_dsp_cli COMMAND test_dsp_cli
+    $<TARGET_FILE:optifine>
+    ${CMAKE_SOURCE_DIR}/../cost_table.toml
+    ${CMAKE_CURRENT_BINARY_DIR}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..)

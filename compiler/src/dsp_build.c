@@ -64,9 +64,8 @@ int dsp_build_pipeline(IrGraph *out) {
 
     /* Bit-reversal also marks where the pipeline goes from real Q15 samples
      * to the complex Q15 working buffer the butterfly stages operate on
-     * (imaginary halves start at zero) -- this is an IR-level typing
-     * decision, not a codegen detail yet, since candidate generation for
-     * DSP ops doesn't exist until milestone 5. */
+     * (imaginary halves start at zero) -- an IR-level typing decision that
+     * lower_bit_reverse implements by zeroing each imaginary half. */
     size_t reversed = ir_graph_push(out, OP_BIT_REVERSE,
                                      make_inputs(1, windowed), 1,
                                      shape1(DSP_FFT_SIZE), 1, DT_COMPLEX_Q15, NULL);

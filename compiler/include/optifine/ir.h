@@ -34,7 +34,9 @@ typedef enum {
     OP_BIT_REVERSE,  /* bit-reversal permutation ahead of the butterfly stages */
     OP_FFT_BUTTERFLY, /* one radix-2 DIT butterfly stage */
     OP_MAGNITUDE,    /* complex magnitude from FFT output */
-    OP_PEAK_EXTRACT, /* local-maxima extraction over the magnitude spectrum */
+    OP_PEAK_EXTRACT, /* the DSP_MAX_PEAKS largest magnitude VALUES, largest first
+                      * (unsigned; not local maxima, and no bin indices -- the
+                      * FIXED_Q15[k] output has no room for them) */
 } OpKind;
 
 typedef struct {

@@ -420,8 +420,8 @@ static void lower_const16(InstrBuf *buf, int16_t value, uint16_t addr) {
  * A single <<1 across the 3-byte accumulator then aligns the result --
  * NOT a 15-bit shift chain -- and the top two bytes are the Q15 product.
  * Truncates rather than rounds (no rounding-bias correction before the
- * shift); test_dsp_lower.c's tolerance check confirms this stays well
- * within the numpy.fft comparison tolerance used later in this plan.
+ * shift): the result is exactly floor(x*y / 32768), i.e. (x*y) >> 15, which
+ * the FFT and full-pipeline tests check bit-exactly against integer oracles.
  * Measured through the real avr-gcc while writing the Milestone 6 spec's
  * 2026-08-03 amendment: 72 bytes, 30 instructions (this instruction count
  * is unaffected by the sign-byte reordering -- same 7 instructions per
@@ -1043,6 +1043,19 @@ static void lower_peak_extract(InstrBuf *buf, const IrGraph *graph, const SramLa
     instrbuf_loop_end(buf, &passes);
 }
 
+int lower_dsp_program_end(const IrGraph *graph, const CostModel *cost_model, Candidate *out) {
+    InstrBuf buf;
+    instrbuf_init(&buf);
+    ins0(&buf, "break");
+    for (size_t i = 0; i < graph->count; i++) {
+        if (graph->ops[i].kind == OP_FFT_BUTTERFLY) {
+            dsp_emit_twiddle_table(&buf);
+            break;
+        }
+    }
+    return instrbuf_price(&buf, cost_model, out);
+}
+
 /* ---- OP_OUTPUT: copy to a fixed, dedicated address ---- */
 
 static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *layout, size_t op_id) {
@@ -1287,8 +1300,7 @@ int lower_op(const IrGraph *graph, size_t op_id,
             break;
         }
         default:
-            fprintf(stderr, "lower: op %zu has OpKind %d, which is out of scope for Phase A (ML path only)\n",
-                    op_id, (int)op->kind);
+            fprintf(stderr, "lower: op %zu has OpKind %d, which has no lowering\n", op_id, (int)op->kind);
             free(buf.items);
             return -1;
     }

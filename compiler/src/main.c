@@ -10,6 +10,7 @@
 #include "optifine/codegen/regalloc.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
+#include "optifine/dsp_build.h"
 #include "optifine/ingest.h"
 #include "optifine/ir.h"
 
@@ -18,11 +19,16 @@ static void usage(const char *argv0) {
             "usage: %s <model.onnx> --cost-table <cost_table.toml> --out <out.s> "
             "[--input <golden_input.txt>] [--optimized] "
             "[--periodic-count N --wait-policy active|powersave --timer-prescaler N]\n"
+            "       %s --dsp --cost-table <cost_table.toml> --out <out.s> [--input <samples.txt>]\n"
+            "  --dsp        compile the fixed 64-point DSP pipeline (Window, BitReverse, FFT x6,\n"
+            "               Magnitude, PeakExtract) instead of an ONNX model. --input holds its 64\n"
+            "               int16 Q15 samples (default models/dsp_demo_input.txt); no model path,\n"
+            "               --optimized or periodic flags\n"
             "  --optimized  use codegen/candidates.c's real candidate diversity "
             "(milestone 5) instead of Phase A's naive single-candidate baseline\n"
             "  periodic mode requires --periodic-count, --wait-policy, and "
             "--timer-prescaler together\n",
-            argv0);
+            argv0, argv0);
 }
 
 static int parse_unsigned(const char *text, unsigned long maximum, unsigned long *out_value) {
@@ -44,6 +50,107 @@ static int parse_unsigned(const char *text, unsigned long maximum, unsigned long
     }
     *out_value = value;
     return 0;
+}
+
+/* Reads whitespace-separated decimal int16 samples from `path` (same format
+ * and `#` comments as read_demo_input) into their little-endian byte image,
+ * which is what OP_INPUT embeds for a DT_FIXED_Q15 tensor. The byte count is
+ * checked against the graph by lower_op. Returns the buffer (caller frees) or
+ * NULL. */
+static int8_t *read_dsp_input(const char *path, size_t *out_len) {
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "failed to open DSP input file: %s\n", path);
+        return NULL;
+    }
+    size_t cap = 128, len = 0;
+    uint8_t *buf = malloc(cap);
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        char *hash = strchr(line, '#');
+        if (hash) *hash = '\0';
+        char *cursor = line;
+        char *endptr;
+        while (1) {
+            long v = strtol(cursor, &endptr, 10);
+            if (endptr == cursor) break;
+            if (v < INT16_MIN || v > INT16_MAX) {
+                fprintf(stderr, "DSP input file %s: value %ld out of int16 range\n", path, v);
+                free(buf);
+                fclose(f);
+                return NULL;
+            }
+            if (len + 2 > cap) {
+                cap *= 2;
+                buf = realloc(buf, cap);
+            }
+            uint16_t u = (uint16_t)(int16_t)v;
+            buf[len++] = (uint8_t)(u & 0xFF);
+            buf[len++] = (uint8_t)(u >> 8);
+            cursor = endptr;
+        }
+    }
+    fclose(f);
+    *out_len = len;
+    return (int8_t *)buf;
+}
+
+/* --dsp: the graph comes from dsp_build_pipeline, not ONNX, and is emitted
+ * by codegen_emit_dsp_program. There is no ML forward-pass check to run; the
+ * DSP lowering's correctness is pinned by test_dsp_pipeline's host oracle. */
+static int run_dsp(const char *cost_table_path, const char *input_path, const char *out_path) {
+    CostModel cost_model;
+    if (cost_model_load(cost_table_path, &cost_model) != 0) {
+        fprintf(stderr, "failed to load cost table: %s\n", cost_table_path);
+        return 1;
+    }
+    size_t input_len = 0;
+    int8_t *input = read_dsp_input(input_path, &input_len);
+    if (!input) {
+        return 1;
+    }
+    IrGraph graph;
+    if (dsp_build_pipeline(&graph) != 0) {
+        free(input);
+        return 1;
+    }
+    SramLayout layout;
+    if (sram_layout_build(&graph, &layout) != 0) {
+        free(input);
+        ir_graph_free(&graph);
+        return 1;
+    }
+    RegAllocResult regalloc;
+    regalloc_next_use(&graph, &regalloc);
+
+    int rc = 1;
+    FILE *out = fopen(out_path, "w");
+    if (!out) {
+        fprintf(stderr, "failed to open output file: %s\n", out_path);
+    } else {
+        DspProgramCost cost;
+        rc = codegen_emit_dsp_program(&graph, &layout, &regalloc, &cost_model, input, input_len, out, &cost);
+        fclose(out);
+        if (rc == 0) {
+            uint32_t total = cost.initialization.cycles + cost.body.cycles + cost.termination.cycles;
+            fprintf(stderr, "dsp initialization (clr r2, input, window coefficients): %u cycles, %.3f nJ (predicted)\n",
+                    cost.initialization.cycles, cost.initialization.energy_nj);
+            fprintf(stderr, "dsp pipeline (window .. output): %u cycles, %.3f nJ (predicted)\n",
+                    cost.body.cycles, cost.body.energy_nj);
+            fprintf(stderr, "dsp termination (break): %u cycles, %.3f nJ (predicted)\n",
+                    cost.termination.cycles, cost.termination.energy_nj);
+            fprintf(stderr, "total: %u cycles, %.3f nJ (predicted, break included; compare against a real "
+                            "sim/run_avrora.sh run for the actual simulated numbers)\n",
+                    total, cost.initialization.energy_nj + cost.body.energy_nj + cost.termination.energy_nj);
+            fprintf(stderr, "sram: %u bytes from 0x%04X (graph tensors + %d-byte DSP scratch)\n",
+                    layout.bytes_used, SRAM_LAYOUT_BASE, DSP_SCRATCH_BYTES);
+        }
+    }
+    free(input);
+    regalloc_result_free(&regalloc);
+    sram_layout_free(&layout);
+    ir_graph_free(&graph);
+    return rc == 0 ? 0 : 1;
 }
 
 /* Reads whitespace-separated decimal int8 values from `path` into a
@@ -92,6 +199,8 @@ int main(int argc, char **argv) {
     const char *out_path = "out.s";
     const char *input_path = "models/tiny_classifier_golden_input.txt";
     int use_real_candidates = 0;
+    int dsp_mode = 0;
+    int input_seen = 0;
     int periodic_count_seen = 0;
     int wait_policy_seen = 0;
     int timer_prescaler_seen = 0;
@@ -104,6 +213,9 @@ int main(int argc, char **argv) {
             out_path = argv[++i];
         } else if (strcmp(argv[i], "--input") == 0 && i + 1 < argc) {
             input_path = argv[++i];
+            input_seen = 1;
+        } else if (strcmp(argv[i], "--dsp") == 0) {
+            dsp_mode = 1;
         } else if (strcmp(argv[i], "--optimized") == 0) {
             use_real_candidates = 1;
         } else if (strcmp(argv[i], "--periodic-count") == 0 && i + 1 < argc) {
@@ -146,6 +258,18 @@ int main(int argc, char **argv) {
     }
 
     int periodic_mode = periodic_count_seen || wait_policy_seen || timer_prescaler_seen;
+    if (dsp_mode) {
+        /* One workload per program: the DSP and ML paths share registers on the
+         * assumption that they are never lowered into the same program (see
+         * registers.h), so a model path is refused rather than ignored. */
+        if (model_path || use_real_candidates || periodic_mode) {
+            fprintf(stderr, "--dsp takes no model path, --optimized (the DSP path has no candidate "
+                            "diversity) or periodic flags\n");
+            usage(argv[0]);
+            return 2;
+        }
+        return run_dsp(cost_table_path, input_seen ? input_path : "models/dsp_demo_input.txt", out_path);
+    }
     if (periodic_mode && !(periodic_count_seen && wait_policy_seen && timer_prescaler_seen)) {
         usage(argv[0]);
         return 2;

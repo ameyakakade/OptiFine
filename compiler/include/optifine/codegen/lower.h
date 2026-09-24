@@ -1,9 +1,9 @@
-/* Phase A: naive, single-candidate AVR lowering for the ML path (Input,
- * Const, MatMul, Add, Relu, Requantize, Output). This is deliberately
- * separate from candidates.c (the milestone-5 candidate-diversity module,
- * still a stub) -- lower_op always produces exactly one real, correct
- * candidate per op, using regalloc's always-spill assignment. Milestone 5
- * will later add real register-resident variants alongside this one. */
+/* Single-candidate AVR lowering for every op of both paths: the ML path
+ * (Input, Const, MatMul, Add, Relu, Requantize, Output -- Phase A's naive
+ * baseline) and the DSP path (Window, BitReverse, FftButterfly, Magnitude,
+ * PeakExtract, with counted loops). lower_op always produces exactly one real,
+ * correct candidate per op, using regalloc's always-spill assignment;
+ * candidates.c adds its register-resident alternatives for ML ops. */
 #ifndef OPTIFINE_CODEGEN_LOWER_H
 #define OPTIFINE_CODEGEN_LOWER_H
 
@@ -44,8 +44,8 @@ int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_inpu
  * graph->ops[op_id].kind == OP_INPUT.
  *
  * Returns 0 on success. Returns non-zero (with an error already printed to
- * stderr) for: any DSP-path OpKind (out of scope for Phase A), or a
- * Requantize op whose compile-time-verified worst-case output would
+ * stderr) for: an OpKind with no lowering, a DSP op whose tensor shapes or
+ * dtypes are not the ones its lowering handles, or a Requantize op whose compile-time-verified worst-case output would
  * overflow int8 range given the model's real weight/bias magnitudes (see
  * lower.c's compute_fixed_multiplier -- this project does not saturate at
  * runtime, it refuses to compile instead). */
@@ -69,6 +69,13 @@ void dsp_emit_twiddle_table(InstrBuf *buf);
 int lower_fft_stage0_test_hook(const IrGraph *graph, size_t op_id,
                                 const SramLayout *layout, const CostModel *cost_model,
                                 Candidate *out);
+
+/* The end of a DSP program: the terminating `break`, priced like any other
+ * instruction (1 cycle), then -- only if the graph has FFT stages -- the one
+ * canonical twiddle table they read through lpm. The table must follow the
+ * break so control flow can never reach it, and must be emitted exactly once
+ * per assembly unit (EmitUnit refuses a second .Ltw). */
+int lower_dsp_program_end(const IrGraph *graph, const CostModel *cost_model, Candidate *out);
 
 /* FFT stages first_stage..last_stage (0-based, inclusive) followed by break
  * and the twiddle table, as one self-contained program. */
