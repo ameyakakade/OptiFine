@@ -21,3 +21,12 @@ tools/jdk8*/
 # subagent-driven-development scratch workspace (ledgers, briefs, review
 # packages) -- process artifacts, not part of the deliverable.
 .superpowers/
+
+# Editor, OS and local tool state
+.vscode/
+.idea/
+*.swp
+.DS_Store
+.claude/
+# JVM crash logs (Avrora)
+hs_err_pid*.log
