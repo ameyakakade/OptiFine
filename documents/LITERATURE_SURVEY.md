@@ -58,7 +58,7 @@ Active, so their model has no term for one.
 
 The moment a sleep/stop instruction is inserted, the elapsed wall-clock
 latency no longer tracks energy, because an idle cycle is not an Active
-cycle. OptiFine's Phase B targets exactly this missing term: a compiler
+cycle. OptiFine's periodic power-aware scheduling targets exactly this missing term: a compiler
 inserts ATmega128 Power-save mode (asynchronous Timer0 wake) between
 inference bursts.
 
@@ -106,18 +106,19 @@ allowed to leave Active mode.
   rather than a Cortex-M anomaly. Their architectural premise ("no
   power-gated sub-components") is not portable to the AVR class OptiFine
   targets.
-- OptiFine does **not** contest the claim *within* active mode. Phase A is
-  explicit corroborating evidence: Phase A's energy model reduces to
-  `cycles x 2.8375 nJ`, so Phase A's energy selection is mathematically
-  identical to cycle selection, and its measured gain (~1.83%, see
-  `REPORT.md`) is a pure cycle reduction — exactly the "only reduce latency"
-  lever Heim et al. predict is the only one available in active mode. Phase
-  A **agrees with** Heim et al.; Phase B is where OptiFine **diverges**.
+- OptiFine does **not** contest the claim *within* active mode. Its
+  active-mode optimization is explicit corroborating evidence: the energy
+  model there reduces to `cycles x 2.8375 nJ`, so energy selection is
+  mathematically identical to cycle selection, and its simulated gain
+  (~1.83%, see `REPORT.md`) is a pure cycle reduction — exactly the "only
+  reduce latency" lever Heim et al. predict is the only one available in
+  active mode. Active-mode optimization **agrees with** Heim et al.;
+  periodic scheduling is where OptiFine **diverges**.
 
 ### 1.5 Honest caveats on the cross-platform comparison
 
-- Phase A/B are validated in the **cycle-accurate Avrora simulator**, not on
-  physical hardware (Phase B hardware correlation is deferred). Heim et al.
+- Both mechanisms are validated in the **cycle-accurate Avrora simulator**,
+  not on physical hardware (hardware correlation is future work). Heim et al.
   measured on real boards with an external energy monitor. The savable,
   ratio-driven conclusions (ratio of active to sleep per-cycle cost; %
   savings vs. idle fraction; deadline feasibility) transfer; absolute µJ
@@ -130,7 +131,7 @@ allowed to leave Active mode.
 
 ---
 
-## 2. Phase B: compiler-directed sleep scheduling — competitors
+## 2. Periodic power-aware scheduling — competitors
 
 | Ref. | Contribution | Layer | Target | Guarantee | Validation | What to compare (axis) |
 |---|---|---|---|---|---|---|
@@ -151,8 +152,8 @@ novelty**, never "we beat X%" across a different ISA and a sim/hardware gap.
 
 OptiFine's defensible position, stated without a superlative: it combines
 and contrasts **two energy-aware compiler layers on one AVR backend** --
-Active-mode machine-code optimisation (Phase A) and compiler-directed
-low-power-state scheduling (Phase B) -- and reports the experimental
+Active-mode machine-code optimisation and compiler-directed
+low-power-state scheduling -- and reports the experimental
 contrast between the two regimes. The contribution is that contrast and
 the engineering integration, not the invention of energy-aware
 compilation (Tiwari et al. 1994 onward) nor of sleep scheduling (Hsu &
@@ -160,7 +161,7 @@ Kremer 2003, Huang & Ghiasi 2007, Wanner et al. 2011), both of which
 long predate this project.
 
 Two claims this project must **not** make. First, that its saving is "the
-largest" for compiler-directed sleep scheduling on AVR: the Phase B
+largest" for compiler-directed sleep scheduling on AVR: the scheduling
 percentage is duty-cycle-parameterized and approaches 100% as the wake
 period grows, so a larger number is always purchasable by sleeping longer
 and means nothing on its own. Second, that the ~61x per-cycle ratio is
@@ -170,19 +171,19 @@ project.
 
 ---
 
-## 3. Phase A: instruction-level energy selection — competitors
+## 3. Active-mode instruction-level energy selection — competitors
 
 | Ref. | Contribution | Target | Reported result | Why it matters / what to compare |
 |---|---|---|---|---|
-| **Surakka et al.**, Proc. Estonian Acad. Sci. Eng. 11(4):347-357, 2005 (doi:10.3176/eng.2005.4.07) | Instruction/register-order selection for energy | **8-bit AVR (AT90S8515)** | ~0.5% savings | The only prior instruction-level-energy work on an AVR; closest head-to-head for Phase A. Reproduce their register-order experiment on ATmega128 and compare vs. OptiFine's ~1.83% on the same ISA family. |
-| **Lee, Tiwari, Malik, Fujita**, IEEE TVLSI 5(3), 1997 (doi:10.1109/92.555992) | Instruction-selection-by-energy scheduling | DSP | 26–73% (scheduling) | The canonical "select instructions by energy" paper. Mechanism ancestor of Phase A, though on a DSP with more scheduling freedom. Corollary: per-ISA savings are not portable. |
+| **Surakka et al.**, Proc. Estonian Acad. Sci. Eng. 11(4):347-357, 2005 (doi:10.3176/eng.2005.4.07) | Instruction/register-order selection for energy | **8-bit AVR (AT90S8515)** | ~0.5% savings | The only prior instruction-level-energy work on an AVR; closest head-to-head for active-mode optimization. Reproduce their register-order experiment on ATmega128 and compare vs. OptiFine's ~1.83% on the same ISA family. |
+| **Lee, Tiwari, Malik, Fujita**, IEEE TVLSI 5(3), 1997 (doi:10.1109/92.555992) | Instruction-selection-by-energy scheduling | DSP | 26–73% (scheduling) | The canonical "select instructions by energy" paper. Mechanism ancestor of active-mode optimization, though on a DSP with more scheduling freedom. Corollary: per-ISA savings are not portable. |
 | **Tiwari, Malik, Wolfe**, IEEE TVLSI 2(4), 1994 (doi:10.1109/92.335012) | Instruction-level power model | embedded RISC/CISC | — | **Proving-correct**: `cost_table.toml` and the whole methodology descend from this. OptiFine confirms (on AVR) that instruction *cycle count* dominates energy when no per-opcode current variation is available to cited sources. |
 | **Pallister et al.**, arXiv:1303.6485 | GCC-flag energy search | ARM | best flag is not portable | Supports OptiFine's per-ISA calibration stance; argues against exporting savings numbers across toolchains. |
 
-**Phase A is NOT a contention with Heim et al.** See §1.4: Phase A's energy
-model is linear in cycles, so it agrees with their "energy is latency"
-finding within active mode. Reporting Phase A as a Phase-A-vs-TinyML
-"contention" would be technically false and is deliberately not made here.
+**Active-mode optimization is NOT a contention with Heim et al.** See §1.4:
+its energy model is linear in cycles, so it agrees with their "energy is
+latency" finding within active mode. Reporting it as a contention with the
+TinyML result would be technically false and is deliberately not done here.
 
 ---
 
@@ -190,7 +191,7 @@ finding within active mode. Reporting Phase A as a Phase-A-vs-TinyML
 
 | Ref. | Claim OptiFine corroborates |
 |---|---|
-| **Titzer, Lee, Palsberg**, IPSN 2005 (doi:10.1109/IPSN.2005.1440978) | Observes tiny networked-sensor programs sleep ~96–99% of the time — the *reason* Phase B's duty-cycle saving is large; OptiFine's 96.3% saving at prescaler 1024 matches this regime. |
+| **Titzer, Lee, Palsberg**, IPSN 2005 (doi:10.1109/IPSN.2005.1440978) | Observes tiny networked-sensor programs sleep ~96–99% of the time — the *reason* the scheduling duty-cycle saving is large; OptiFine's 96.3% saving at prescaler 1024 matches this regime. |
 | **Xie et al.**, PLDI 2008 | Analytic limit of compile-time mode scheduling — OptiFine's `saving ~= 0.984 x idle_fraction` sits within this bound. |
 | **Tiwari et al.** 1994 (as above) | Per-instruction cycle-count energy methodology. |
 | **Pallister et al.** 2013 (as above) | Savings are not portable across ISA/toolchain — OptiFine's refusal to extrapolate a single number across platforms follows this. |
@@ -232,7 +233,7 @@ finding within active mode. Reporting Phase A as a Phase-A-vs-TinyML
     Atmel AVR sleep-mode RTC wake documentation.
 13. Atmel/Microchip, "ATmega128/L 8-bit AVR Microcontroller with 128KBytes
     In-System Programmable Flash" device datasheet. The normative source
-    for every device-specific mechanism Phase B depends on: Power-save
+    for every device-specific mechanism periodic scheduling depends on: Power-save
     sleep mode and the MCUCR SM2:0 encoding, Timer/Counter0 asynchronous
     operation via ASSR.AS0, the Timer0 overflow interrupt and its
     prescaler divisors, and the device's SRAM/flash sizes. Cited for

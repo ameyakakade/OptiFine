@@ -1,5 +1,12 @@
 # Phase B design: compiler-directed duty-cycle scheduling
 
+> **Historical development document.** Written during development, it uses
+> the project's internal stage names, which current documentation replaces:
+> "Phase A" is **active-mode optimization**, "Phase B" is **periodic
+> power-aware scheduling**, and "milestone 6" is the **DSP workload**
+> (the 64-point Q15 pipeline). Kept as the record of how the design was
+> reached; for current behaviour and results see `README.md` and `REPORT.md`.
+
 Date: 2026-08-28
 
 ## Purpose

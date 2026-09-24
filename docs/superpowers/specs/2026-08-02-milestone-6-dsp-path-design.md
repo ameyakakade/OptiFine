@@ -1,5 +1,12 @@
 # Milestone 6: DSP path instruction selection, comparison, and Phase B extension
 
+> **Historical development document.** Written during development, it uses
+> the project's internal stage names, which current documentation replaces:
+> "Phase A" is **active-mode optimization**, "Phase B" is **periodic
+> power-aware scheduling**, and "milestone 6" is the **DSP workload**
+> (the 64-point Q15 pipeline). Kept as the record of how the design was
+> reached; for current behaviour and results see `README.md` and `REPORT.md`.
+
 > **Status (2026-09-24).** Implemented, including the Phase B extension (Goals,
 > fourth item; `sim/fixtures/phase_b_dsp/`). Scoping decision 2 below (no loops,
 > everything unrolled) was reversed on 2026-08-08 when the unrolled program

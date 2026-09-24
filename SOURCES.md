@@ -1,7 +1,7 @@
 # Sources
 
 Every entry in `cost_table.toml` must be justified by an entry here before
-it is treated as real. As of the milestone-6 sourcing pass no `PLACEHOLDER`
+it is treated as real. As of the cost-table sourcing pass no `PLACEHOLDER`
 entries remain: all 9 table entries carry an Avrora-derived figure and a
 citation. No physically-measured numbers are
 permitted anywhere in this project (see spec section 3) -- only cited
@@ -36,7 +36,7 @@ variation exists for this MCU class.
 
 **Superseded 2026-08-27 (spec v2 section 13):** an earlier version of this
 file derived the per-cycle constant from the ATmega128 datasheet's Active
-8MHz/5V row (17mA typical, giving 10.625 nJ/cycle). Phase A's first real
+8MHz/5V row (17mA typical, giving 10.625 nJ/cycle). The first real
 end-to-end run through Avrora (`sim/fixtures/classifier_naive.s` -> real
 `.elf` -> `sim/run_avrora.sh`) showed predicted and real *cycle* counts
 matching almost exactly (6129 predicted vs. 6130 simulated -- the +1 is

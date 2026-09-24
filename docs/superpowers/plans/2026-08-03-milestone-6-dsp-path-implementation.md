@@ -1,5 +1,12 @@
 # Milestone 6: DSP Path Implementation Plan
 
+> **Historical development document.** Written during development, it uses
+> the project's internal stage names, which current documentation replaces:
+> "Phase A" is **active-mode optimization**, "Phase B" is **periodic
+> power-aware scheduling**, and "milestone 6" is the **DSP workload**
+> (the 64-point Q15 pipeline). Kept as the record of how the design was
+> reached; for current behaviour and results see `README.md` and `REPORT.md`.
+
 > **Implementation status (2026-09-24).** This is the plan as written; parts
 > of it were superseded while it was carried out, and each such section below
 > carries a "Superseded" note pointing to what was built. Current behaviour
@@ -2369,7 +2376,7 @@ print("#endif")
 ```
 
 ```bash
-cd /home/rugbedbugg/Projects/C_C++/OptiFine
+cd <repository root>
 python3 - <<'PYEOF' > models/dsp_demo_signal.h
 <paste the snippet above>
 PYEOF
@@ -2990,7 +2997,7 @@ separate task.)
 - [ ] **Step 1: Compile and measure real flash size**
 
 ```bash
-cd /home/rugbedbugg/Projects/C_C++/OptiFine
+cd <repository root>
 ./compiler/build_linux/optifine --dsp --cost-table cost_table.toml --out sim/fixtures/dsp_naive/dsp.s
 avr-gcc -mmcu=atmega128 -c sim/fixtures/dsp_naive/dsp.s -o sim/fixtures/dsp_naive/dsp.o
 avr-gcc -mmcu=atmega128 sim/fixtures/dsp_naive/dsp.o -o sim/fixtures/dsp_naive/dsp.elf

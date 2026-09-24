@@ -1,5 +1,12 @@
 # Phase B Duty-Cycle Scheduling Implementation Plan
 
+> **Historical development document.** Written during development, it uses
+> the project's internal stage names, which current documentation replaces:
+> "Phase A" is **active-mode optimization**, "Phase B" is **periodic
+> power-aware scheduling**, and "milestone 6" is the **DSP workload**
+> (the 64-point Q15 pipeline). Kept as the record of how the design was
+> reached; for current behaviour and results see `README.md` and `REPORT.md`.
+
 
 **Goal:** Build and evaluate matched active-wait and Power-save periodic AVR classifier programs, sweep four duty cycles, and document whether sleep scheduling adds energy savings beyond Phase A.
 

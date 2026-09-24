@@ -1,448 +1,325 @@
 # OptiFine
 
-![GitHub last commit](https://img.shields.io/github/last-commit/rugbedbugg/OptiFine?style=for-the-badge&labelColor=000000)
-![GitHub repo size](https://img.shields.io/github/repo-size/rugbedbugg/OptiFine?style=for-the-badge&labelColor=000000)
-![Stars](https://img.shields.io/github/stars/rugbedbugg/OptiFine?style=for-the-badge&labelColor=000000)
+OptiFine is a research prototype of an energy-aware compiler backend for
+resource-constrained AVR microcontrollers. It compiles two structurally
+different workloads -- a small INT8 neural-network classifier (from ONNX) and a
+fixed 64-point Q15 DSP pipeline -- to ATmega128 assembly, prices every emitted
+instruction with a sourced energy model, and evaluates the result in the Avrora
+cycle-accurate simulator.
 
-Compiler backend that takes IR from two sources - an INT8-quantized neural network (PyTorch → ONNX) and a fixed-size audio/DSP pipeline (64-point FFT, Q15 fixed-point) - and compiles both to AVR machine code, selecting between candidate instruction sequences by **estimated energy cost** instead of cycle count. Validated end-to-end via Avrora (cycle-accurate AVR simulator with built-in energy monitor). No physical hardware in Phase 1 (sim-only); sim-to-hardware correlation is deferred Phase 2 work.
+**Status: research prototype.** Both workloads compile end to end and are
+evaluated in simulation, with the compiler's cycle prediction matching Avrora
+exactly for every retained program. All energy figures are **simulated**
+(Avrora's ATmega128 power model); no physical board has been measured.
+Hardware validation is future work.
 
-## Status
+## What OptiFine does
 
-**ML path: working end-to-end.** The compiler ingests the demo ONNX model,
-lowers it to AVR, selects candidates by cost, allocates registers with
-next-use information, and emits assembly that `avr-gcc` assembles and Avrora
-simulates. Phase A (Active-mode code generation) and Phase B (compiler-emitted
-sleep scheduling) both produce verified results; see `REPORT.md`, or regenerate
-every figure from raw simulator output with `python3 sim/report_results.py`.
+- **Compiles an ONNX classifier and a Q15 DSP pipeline to AVR** through one
+  typed IR, one lowering and emission backend, and one cost model.
+- **Active-mode optimization:** chooses between alternative instruction
+  sequences by predicted energy, with next-use-informed register caching.
+- **Periodic power-aware scheduling:** wraps a compute body in a timer-driven
+  periodic program that spends the rest of each period either busy-waiting or
+  in AVR Power-save mode.
+- **Predicts cycles exactly:** straight-line code and statically bounded loops
+  are priced per executed instruction; for every retained program the
+  prediction equals Avrora's cycle count.
+- **Keeps its evidence:** raw simulator output is retained in the repository,
+  and every reported figure is regenerated from it by script.
 
-**DSP path: working end-to-end.** `optifine --dsp` compiles the complete
-64-point Q15 pipeline (Window, BitReverse, six FFT stages, exact Magnitude,
-top-8 PeakExtract) into one AVR program: 12,800 B of flash, 2,517 B of SRAM,
-148,335 cycles, with the compiler's cycle prediction matching Avrora exactly.
-Every intermediate buffer matches an independent integer host reference
-bit-for-bit. Phase B's periodic sleep scheduling runs on both workloads: at the
-one prescaler whose period can hold the DSP body, sleeping instead of polling
-saves 43% per period. Figures are simulated (Avrora), not measured on hardware.
+## Key results
 
-See `energy_aware_compiler_spec_v2.md` for the build spec and milestone order.
+All figures are Avrora simulations of an ATmega128 at 8 MHz. They are derived
+from the retained raw output by `python3 sim/report_results.py`; the full
+tables and their method are in [REPORT.md](REPORT.md).
 
-## Features
+| Result | Value |
+|---|---|
+| ML classifier, cycles (naive -> optimized) | 6,130 -> 6,018 (-1.83%) |
+| ML classifier, simulated energy (naive -> optimized) | 17,393.95 -> 17,076.15 nJ |
+| DSP pipeline, cycles (predicted = Avrora) | 148,335 (18.542 ms at 8 MHz) |
+| DSP pipeline, simulated active energy | 420,902.42 nJ (420.90 µJ) |
+| DSP pipeline, linked flash / SRAM | 12,800 B / 2,517 B |
+| Periodic scheduling, ML, Power-save vs busy-wait, per period | 33.31% / 82.10% / 96.33% saved at prescaler 32 / 128 / 1024 |
+| Periodic scheduling, DSP, prescaler 1024, per period | 743,836.88 nJ busy-wait (period-normalized) vs 424,239.11 nJ Power-save: 42.97% saved |
 
-| Feature | Description |
-|---------|-------------|
-| Custom typed IR | Ingestion parses ONNX protobuf directly, no lexer/parser |
-| Candidate generation | ≥2 equivalent AVR instruction sequences per IR op |
-| Energy-cost selection | Via `cost_table.toml` (cited sources required) |
-| Register allocation | Next-use information for AVR's limited register file |
-| AVR assembly emission | `avr-gcc`/`avr-as` → ELF → Avrora simulation |
-| Sleep scheduling | Periodic wrapper with busy-wait or Power-save waiting (Phase B, ML and DSP workloads) |
-| DSP pipeline | `--dsp`: 64-point Q15 FFT pipeline lowered with statically bounded counted loops, exact cycle pricing |
-| End-to-end comparison | Same model compiled naive vs. optimized, both simulated |
+The ML and DSP rows are different computations; they show what the backend can
+handle, not a contest between the workloads. The periodic-scheduling savings
+depend on how much of each period is idle (the ML body fills about 2% of the
+1024-prescaler period, the DSP body about 56%), so they are separate,
+workload-dependent results and are not averaged. The DSP busy-wait figure is
+normalized from the simulated 262,141-cycle increment to the exact
+262,144-cycle period (see [Periodic power-aware scheduling](#periodic-power-aware-scheduling)).
 
-`compiler/src/locality.c` exists but is a **no-op stub**; the memory-locality
-pass described in the spec is not implemented, and no result in this repository
-depends on it.
-
-## Tech Stack
-
-| Component | Details |
-|-----------|---------|
-| Model Export (`export/`) | Python + PyTorch + `torch.onnx.export` (existing tooling) |
-| Compiler Core (`compiler/`) | C (C11, CMake) - hand-built pipeline: IR, ingestion, codegen (candidates, regalloc, select), cost model, locality, emit; unit tests via CMake/CTest |
-| Simulation (`sim/`) | Avrora (Java) + `avr-gcc`/`avr-as`/`avr-objcopy` (AVR toolchain) |
-| Cost Table (`cost_table.toml`) | Per-instruction energy costs, every entry sourced |
-
-## Pipeline
+## Architecture
 
 ```
-Model Export        Custom IR         AVR Target      Energy-Cost         Emit AVR      Avrora         Comparison
-(ONNX/TFLite)  -->  (typed op    -->  Selection   -->  Instruction   -->  Assembly  -->  Simulation --> & Report
- [existing]           graph)           [this proj]      Selection          [this proj]    [validation]
-                       [this proj]                        [this proj,
-                                                           centerpiece]
+ONNX classifier --(ingest.c)--\
+                               >-- typed IR --> lowering / candidates --> cost-based --> AVR assembly --> avr-gcc --> Avrora
+DSP pipeline ---(dsp_build.c)-/                 (lower.c, candidates.c)    selection        (emit.c)                 (energy
+                                                                           (select.c)                                monitor)
 ```
 
-### Stages
+- **IR** (`compiler/src/ir.c`): a typed op graph shared by both workloads.
+- **Ingestion** (`compiler/src/ingest.c`): a hand-written protobuf reader for
+  the ONNX operators the classifier uses (MatMul, Add, Relu, Requantize).
+- **DSP builder** (`compiler/src/dsp_build.c`): constructs the fixed DSP graph
+  directly.
+- **Lowering** (`compiler/src/codegen/lower.c`): one correct instruction
+  sequence per op; DSP ops use statically bounded counted loops.
+- **Candidates and selection** (`candidates.c`, `select.c`): a second,
+  register-cached sequence for MatMul, chosen by predicted energy.
+- **Pricing** (`instr_buf.c`, `cost_table.toml`): every instruction's cost is
+  cycles times a per-cycle constant calibrated to Avrora's own ATmega128 model
+  (see [SOURCES.md](SOURCES.md)).
+- **Emission** (`emit.c`, `program.c`, `periodic.c`): whole programs, one label
+  namespace per assembly file, optionally inside the periodic wrapper.
 
-1. **Export** (`export/export_model.py`): PyTorch `TinyClassifier` (MatMul, Add, Relu, Requantize) → INT8-quantized ONNX
-2. **Ingest** (`compiler/src/ingest.c`): ONNX protobuf → custom IR (OpKind: Input, Const, MatMul, Add, Relu, Requantize, Output)
-3. **Codegen** (`compiler/src/codegen/`):
-   - `candidates.c`: Generate ≥2 equivalent AVR instruction sequences per IR op
-   - `regalloc.c`: Next-use register allocation
-   - `select.c`: Pick candidate with minimum `energy_nj` from cost table
-4. **Locality** (`compiler/src/locality.c`): Reorder/restructure to maximize register reuse, reduce SRAM loads
-5. **Emit** (`compiler/src/emit.c`): Output AVR assembly (`.s`)
-6. **Simulate** (`sim/run_avrora.sh`): Assemble → ELF → Avrora energy monitor → parse report
-7. **Compare**: Run both speed-optimized and energy-aware builds, diff energy numbers
+`compiler/src/locality.c` is a no-op placeholder; no result depends on it.
 
-## Install
+## Supported workloads
 
-### Prerequisites
+### ML classifier
 
-| Requirement | Details |
-|-------------|---------|
-| CMake | ≥ 3.16 |
-| C11 compiler | clang/MSVC/GCC |
-| Python 3 + PyTorch | For `export/export_model.py` |
-| AVR toolchain | `avr-gcc`, `avr-as`, `avr-objcopy` |
-| Avrora | `avrora.jar` (requires JVM) |
-| ONNX protobuf | `protoc` + `onnx.proto` (for ingestion) |
+A 16 -> 8 -> 4 INT8 classifier (`models/tiny_classifier.onnx`, exported by
+`export/export_model.py`), compiled naive (one sequence per op) or optimized
+(candidate diversity for MatMul plus next-use input caching). Its output is
+checked bit-exactly against an independent golden reference.
 
-The compiler itself (`compiler/`) is host C11 with no AVR dependency --
-`cmake`/a C compiler is all it needs to build and pass its CTest suite on
-Linux, macOS, or Windows. The AVR toolchain and Avrora are only needed to
-actually simulate emitted assembly (`sim/run_avrora.sh`,
-`sim/run_phase_b.py`).
+### 64-point Q15 DSP pipeline
 
-#### Linux toolchain setup
+```
+Input -> Hamming window -> bit reversal -> 64-point radix-2 FFT -> exact magnitude -> top-8 selection -> Output
+```
+
+- **FFT:** six decimation-in-time stages, forward transform, Q15 arithmetic,
+  1/2 scaling per stage (1/64 overall), twiddles from a 32-entry program-memory
+  table.
+- **Magnitude:** exact `floor(sqrt(re^2 + im^2))` per bin, via a 32-bit
+  unsigned square sum and a fixed 16-iteration integer square root.
+- **Top-8 selection:** the eight largest magnitudes, largest first, compared
+  unsigned. Only the values are output, not bin positions.
+
+The whole compiled program matches an independent integer host reference
+exactly at every intermediate buffer, over 18 test signals.
+
+## Active-mode optimization
+
+With the processor always active, energy-optimal and cycle-optimal code
+coincide under Avrora's power model: no available source supports pricing AVR
+instructions differently by type within Active mode, and equal-cycle sequences
+simulate to identical energy. The optimizer therefore saves exactly what it
+saves in cycles -- 112 cycles, 1.83%, on the classifier -- and that equivalence
+is one of the project's findings. There is deliberately no separate
+speed-versus-energy switch.
+
+## Periodic power-aware scheduling
+
+A periodic program runs the compute body once per Timer0 period and spends the
+rest of the period either **busy-waiting** (polling in Active mode) or in
+**Power-save** mode, woken by the timer. The body is identical in both builds;
+only the waiting differs. Figures are steady-state differences between 5 and 4
+periods, which cancel one-time setup.
+
+Because an Active cycle costs about 61 times a Power-save cycle in Avrora's
+model, the saving tracks the idle fraction of the period, not the compute code:
+
+- **ML classifier:** its short body leaves most of each period idle, reaching
+  96.33% saved at prescaler 1024.
+- **DSP pipeline:** the 147,565-cycle body fits only the 262,144-cycle period
+  of prescaler 1024 (prescalers 8, 32 and 128 are compute-bound, with no idle
+  window). There it fills about 56% of the period, and Power-save saves
+  42.97%.
+
+**Busy-wait normalization (DSP only).** The busy-wait loop polls in an 8-cycle
+loop, so each wake is detected up to 8 cycles late; with the DSP body the
+detection phase does not settle, and the raw busy-wait increment Avrora reports
+is 262,141 cycles against the exact 262,144 of the Power-save increment. The DSP
+busy-wait energy is scaled by 262,144 / 262,141 to one exact period (raw:
+743,828.36 nJ; normalized: 743,836.88 nJ). The normalized value equals the ML
+sweep's directly simulated busy-wait energy at the same period, as it should:
+busy-waiting spends the whole period in Active mode whatever the workload.
+
+## Build
+
+Requirements:
+
+| Requirement | Used for |
+|---|---|
+| CMake >= 3.16 and a C11 compiler | the compiler and its tests (Linux, macOS, Windows) |
+| Python 3 | result generation and reproduction scripts; `pytest` for their tests |
+| AVR toolchain (`avr-gcc`, `avr-binutils`, `avr-libc`) | assembling emitted programs |
+| JDK 8 and Avrora Beta 1.7.115 | simulation |
+| PyTorch + ONNX | only to re-export the demo model |
 
 ```bash
-./tools/setup_linux.sh
+cmake -S compiler -B compiler/build
+cmake --build compiler/build
+ctest --test-dir compiler/build
 ```
 
-Downloads a pinned JDK 8 (Avrora 1.7.115 crashes on JDK 9+, see
-`sim/run_avrora.sh`) and the exact `avrora-beta-1.7.115.jar` this
-project's energy constants are calibrated against (`SOURCES.md`) into
-`tools/` -- no root needed for either. `avr-gcc`/`avr-libc`/`avr-binutils`
-still need a real system package (Arch's prebuilt `avr-gcc` hardcodes its
-linker lookup to `/usr/bin/avr-ld` in a way that ignores relocated
-copies -- confirmed empirically, not assumed):
+On Linux, `./tools/setup_linux.sh` downloads a pinned JDK 8 and
+`avrora-beta-1.7.115.jar` into `tools/` (neither is committed). Avrora 1.7.115
+does not run on newer JDKs, so the scripts look for `tools/jdk8*` first; when
+calling `sim/run_avrora.sh` directly, point `JAVA_HOME` at it. The AVR toolchain
+comes from the system package manager:
 
 ```bash
-sudo pacman -S avr-gcc avr-binutils avr-libc      # Arch/Manjaro
+sudo pacman -S avr-gcc avr-binutils avr-libc      # Arch
 sudo apt install gcc-avr avr-libc binutils-avr     # Debian/Ubuntu
 sudo dnf install avr-gcc avr-libc avr-binutils     # Fedora
 ```
 
-`sim/run_avrora.sh` and `sim/run_phase_b.py` both auto-discover `avr-gcc`
-(PATH, or `$AVR_GCC`), the vendored JDK 8 (or `$JAVA8_BIN`/`$JAVA_HOME`),
-and the vendored `avrora.jar` (or `$AVRORA_JAR`) in that order -- set the
-env vars to override any of them.
+## Usage
 
-### Build Compiler
+### ML classifier
 
 ```bash
-cmake -S compiler -B compiler/build
-cmake --build compiler/build
-ctest --test-dir compiler/build
+compiler/build/optifine models/tiny_classifier.onnx --cost-table cost_table.toml \
+  --input models/tiny_classifier_golden_input.txt --out build/naive.s
+compiler/build/optifine models/tiny_classifier.onnx --cost-table cost_table.toml \
+  --input models/tiny_classifier_golden_input.txt --optimized --out build/optimized.s
 ```
 
-Output: `compiler/build/optifine.exe` (or `optifine` on Linux).
-
-### Export Demo Model
+### DSP pipeline
 
 ```bash
-cd export
-python export_model.py --out ../models/tiny_classifier.onnx
-```
-
-### Compile Model (naive vs optimized)
-
-```bash
-# Naive baseline: one candidate per op, every value reloaded from SRAM
-./compiler/build/optifine models/tiny_classifier.onnx \
-  --cost-table cost_table.toml \
-  --input models/tiny_classifier_golden_input.txt \
-  --out build/naive.s
-
-# Optimized: real candidate diversity + next-use input caching
-./compiler/build/optifine models/tiny_classifier.onnx \
-  --cost-table cost_table.toml \
-  --input models/tiny_classifier_golden_input.txt \
-  --optimized \
-  --out build/optimized.s
-```
-
-There is deliberately no `--strategy speed|energy` flag. An earlier design
-anticipated one, but the project's own sourcing pass found that no available
-source supports differentiating AVR energy by instruction *type* within Active
-mode, so every cost-table entry reduces to `cycles x a single constant` and a
-"speed" strategy would select exactly what an "energy" strategy selects. That
-collapse is a **result**, documented in `REPORT.md` and `SOURCES.md`, not an
-unimplemented feature.
-
-### Simulate & Compare
-
-The simulation target is **ATmega128**. Avrora Beta 1.7.115 ships no
-`atmega328p` or `atmega2560` MCU class, so ATmega128 is the closest supported
-device and every energy constant in this project is calibrated to it.
-
-```bash
-./sim/run_avrora.sh build/naive.s atmega128
-./sim/run_avrora.sh build/optimized.s atmega128
-```
-
-### Regenerate the result tables
-
-Every figure in `REPORT.md` is derived from raw Avrora output rather than
-transcribed. To recompute them:
-
-```bash
-python3 sim/report_results.py                 # Markdown to stdout
-python3 sim/report_results.py --format csv
-python3 sim/report_results.py --out-dir build/results
-```
-
-### Phase B: periodic sleep scheduling
-
-```bash
-# Revalidate the canonical retained experiment. Starts no tool, writes no file.
-python3 sim/run_phase_b.py reproduce-retained
-
-# Run a fresh experiment with the current toolchain, into a new directory.
-python3 sim/run_phase_b.py run-new --output-dir build/phase_b_new
-
-# Extend an existing count-4 experiment with the count-5 sweep.
-python3 sim/run_phase_b.py supplemental --output-dir build/phase_b_new
-```
-
-`reproduce-retained` validates the retained assembly and Avrora reports
-byte-for-byte and re-derives the result tables from them. It reports whether
-this machine's toolchain matches the one that produced the canonical run, but
-does not require it to, because it never invokes the toolchain. `run-new`
-refuses a directory that already holds a manifest, and `supplemental` refuses
-the canonical fixture directory, so neither can overwrite retained evidence.
-
-### Compile the DSP pipeline
-
-`--dsp` builds the fixed 64-point Q15 pipeline -- Input, Hamming window
-coefficients, Window, BitReverse, six radix-2 FFT stages, exact Magnitude,
-PeakExtract (the 8 largest magnitudes, largest first), Output -- instead of
-reading an ONNX model, and writes one AVR assembly file.
-
-```bash
-cmake -S compiler -B compiler/build && cmake --build compiler/build
-
-# Default input: models/dsp_demo_input.txt (two tones, bins 5 and 12)
-compiler/build/optifine --dsp --cost-table cost_table.toml --out build/dsp.s
-
-# Your own 64 samples
-compiler/build/optifine --dsp --cost-table cost_table.toml --input samples.txt --out build/dsp.s
+compiler/build/optifine --dsp --cost-table cost_table.toml --out build/dsp.s                       # default input
+compiler/build/optifine --dsp --cost-table cost_table.toml --input samples.txt --out build/dsp.s   # your samples
 ```
 
 The input file holds 64 decimal int16 (Q15) samples separated by whitespace;
-`#` starts a comment. The samples are embedded in the program at compile time,
-as the ML path embeds its demo input. The compiler prints its predicted cycles
-and SRAM use on stderr. `--dsp` takes no model path and refuses `--optimized`
-(the DSP ops have a single candidate each).
+`#` starts a comment. The default, `models/dsp_demo_input.txt`, is two tones on
+bins 5 and 12. Samples are embedded in the program at compile time. `--dsp`
+takes no model path and does not accept `--optimized` (each DSP op has one
+lowering).
 
-Simulate it with the same wrapper as the ML builds. This repository's Avrora
-workflow runs on the bundled JDK 8; a newer JDK (such as one installed by mise)
-fails to start Avrora's simulator here:
+### Periodic scheduling
 
-```bash
-JAVA_HOME=$PWD/tools/jdk8u504-b01 bash sim/run_avrora.sh build/dsp.s
-# Simulated time: 148335 cycles  (the default input; the count does not depend on the samples)
-```
-
-The canonical DSP result is retained in `sim/fixtures/dsp/` with a manifest of
-hashes, commands and tool versions:
-
-```bash
-python3 sim/run_dsp.py check                                   # verify it; runs no tool
-JAVA_HOME=$PWD/tools/jdk8u504-b01 \
-  python3 sim/run_dsp.py capture --output-dir build/dsp_new     # fresh capture
-python3 sim/run_dsp.py compare sim/fixtures/dsp build/dsp_new  # same program, same figures?
-```
-
-The Phase B periodic flags wrap the same DSP program as they wrap the ML body:
+Either workload can be wrapped:
 
 ```bash
 compiler/build/optifine --dsp --cost-table cost_table.toml --out build/dsp_ps.S \
   --periodic-count 4 --wait-policy powersave --timer-prescaler 1024
-
-python3 sim/run_phase_b_dsp.py                                         # revalidate the retained sweep; runs no tool
-python3 sim/run_phase_b_dsp.py run-new --output-dir build/phase_b_dsp  # fresh 16-run sweep
 ```
 
-The sweep covers the same four prescalers and both wait policies as the ML one.
-Only prescaler 1024 (a 262,144-cycle period) is long enough for the 147,565-cycle
-DSP body; the other three are reported as compute-bound, with no idle window.
-The saving at 1024 depends on how much of the period is idle, not on the DSP
-code (see `REPORT.md`).
-
-## Commands
-
-### Compiler (`optifine`)
-
-```bash
-optifine <model.onnx> --cost-table <cost_table.toml> --out <out.s> [--input <vec.txt>]
-         [--optimized] [--periodic-count <n> --wait-policy active|powersave
-          --timer-prescaler 8|32|128|1024]
-optifine --dsp --cost-table <cost_table.toml> --out <out.s> [--input <samples.txt>]
-         [--periodic-count <n> --wait-policy active|powersave --timer-prescaler 8|32|128|1024]
-```
-
-| Flag | Description |
-|------|-------------|
-| `--cost-table` | Path to `cost_table.toml` (required) |
-| `--out` | Output assembly file (default: `out.s`) |
-| `--input` | Demo input vector (ML: int8 values; `--dsp`: 64 int16 samples), compile-time baked into the program |
-| `--dsp` | Compile the fixed 64-point DSP pipeline instead of an ONNX model |
-| `--optimized` | Use real candidate diversity + next-use input caching (default: naive) |
-| `--periodic-count` | Emit a periodic wrapper running the body N times (Phase B) |
-| `--wait-policy` | `active` (busy-wait) or `powersave` (sleep between inferences) |
-| `--timer-prescaler` | Timer0 divisor setting the wake period |
-
-### Export Model
-
-```bash
-python export/export_model.py [--out <path>] [--in-features <n>]
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--out` | `../models/tiny_classifier.onnx` | Output ONNX path |
-| `--in-features` | `16` | Input dimension |
+`--periodic-count` sets how many periods run, `--wait-policy` is `active`
+(busy-wait) or `powersave`, and `--timer-prescaler` (8, 32, 128 or 1024) sets
+the period, 256 x prescaler cycles.
 
 ### Simulate
 
 ```bash
-./sim/run_avrora.sh <in.s> <platform> [avrora.jar path]
+JAVA_HOME=$PWD/tools/jdk8u504-b01 bash sim/run_avrora.sh build/dsp.s
+# Simulated time: 148335 cycles
 ```
 
-| Arg | Description |
-|-----|-------------|
-| `<in.s>` | Emitted AVR assembly |
-| `<platform>` | MCU name (default and only calibrated target: `atmega128`) |
-| `[avrora.jar]` | Path to Avrora JAR (default: `$AVRORA_JAR`, else `./avrora.jar`, else `tools/avrora.jar`) |
+`sim/run_avrora.sh <in.s> [mcu] [avrora.jar]` assembles and runs a program;
+the MCU defaults to `atmega128`, the only calibrated target (Avrora 1.7.115 has
+no ATmega328P or ATmega2560 model).
 
-## Options / Configuration
+### Compiler options
 
-### Cost Table (`cost_table.toml`)
+| Flag | Description |
+|---|---|
+| `--cost-table` | path to `cost_table.toml` |
+| `--out` | output assembly file |
+| `--input` | compile-time input (ML: int8 values; `--dsp`: 64 int16 samples) |
+| `--optimized` | ML only: candidate diversity and next-use input caching |
+| `--dsp` | compile the DSP pipeline instead of an ONNX model |
+| `--periodic-count`, `--wait-policy`, `--timer-prescaler` | periodic wrapper, all three together |
 
-Every entry has a cited source; **no `PLACEHOLDER` entries remain**. All 9
-entries are recorded in `SOURCES.md` with their derivation.
+## Reproducing the results
 
-```toml
-[instructions]
-ADD      = { energy_nj = 2.8375, source = "Avrora ATmega128 power model x 1 cycle" }
-MUL      = { energy_nj = 5.675,  source = "Avrora ATmega128 power model x 2 cycles" }
-LD_SRAM  = { energy_nj = 5.675,  source = "... x 2 cycles (LDS)" }
-```
+The retained simulator evidence lives under `sim/fixtures/`:
 
-**The important finding, not a shortcut:** no source available to this project
-(AVR datasheets, the instruction-level energy literature, or Avrora's own
-monitor) supports differentiating energy by instruction *type* within Active
-mode. Equal-cycle sequences were confirmed empirically to produce bit-identical
-simulated energy. Every entry is therefore
-`cycles(instruction) x per_cycle_energy_nj`, where the constant (2.8375125
-nJ/cycle) is calibrated to Avrora's own ATmega128 model (3.0 V, 7.5667 mA
-Active), **not** to a datasheet operating point. A datasheet-derived constant
-used earlier overstated Avrora's simulated energy by ~3.75x. Full derivation
-and citations in `SOURCES.md`.
+| Directory | Contents |
+|---|---|
+| `sim/fixtures/classifier_*` | active-mode ML runs (naive and optimized) |
+| `sim/fixtures/phase_b/` | periodic-scheduling sweep over the ML classifier |
+| `sim/fixtures/dsp/` | the complete DSP program |
+| `sim/fixtures/phase_b_dsp/` | periodic-scheduling sweep over the DSP pipeline |
 
-### Sources (`SOURCES.md`)
-
-`SOURCES.md` carries the derivation and citation behind every cost-table
-constant, including how the per-cycle figure was recovered from Avrora's own
-compiled power model and why the datasheet-derived alternative was rejected.
-Relevant prior work and this project's positioning against it are in
-`documents/LITERATURE_SURVEY.md`.
-
-## Project Structure
-
-```
-OptiFine/
-├── export/
-│   └── export_model.py        # PyTorch -> ONNX (thin, existing tooling)
-├── compiler/                  # C - the actual project
-│   ├── include/optifine/
-│   │   ├── cost_model.h
-│   │   ├── emit.h
-│   │   ├── ingest.h
-│   │   ├── ir.h
-│   │   ├── locality.h
-│   │   └── codegen/
-│   │       ├── candidates.h
-│   │       ├── regalloc.h
-│   │       └── select.h
-│   ├── src/
-│   │   ├── main.c             # CLI: ONNX model, or --dsp
-│   │   ├── cost_model.c
-│   │   ├── dsp_build.c        # DSP path: hand-built IR (fixed 64-pt FFT)
-│   │   ├── emit.c
-│   │   ├── ingest.c           # ML path: ONNX protobuf -> IR
-│   │   ├── ir.c
-│   │   ├── locality.c
-│   │   └── codegen/
-│   │       ├── candidates.c
-│   │       ├── dsp32.c        # DSP 32-bit primitives, isqrt32, mask/select
-│   │       ├── instr_buf.c    # instruction buffers, counted loops, pricing
-│   │       ├── lower.c        # per-op lowering, ML and DSP
-│   │       ├── program.c      # whole-program emission (ML and --dsp)
-│   │       ├── regalloc.c
-│   │       └── select.c
-│   ├── tests/
-│   │   ├── CMakeLists.txt
-│   │   ├── avr_interp.c       # test-only AVR interpreter
-│   │   ├── test_dsp_pipeline.c  # complete DSP program vs. host reference
-│   │   └── test_*.c
-│   └── CMakeLists.txt
-├── sim/
-│   ├── run_avrora.sh          # Assemble + invoke Avrora
-│   ├── parse_report.py        # Parse Avrora energy output
-│   ├── report_results.py      # Derive every result table from raw output
-│   ├── run_phase_b.py         # Phase B experiment runner
-│   ├── run_dsp.py             # DSP baseline capture / check / compare
-│   ├── run_phase_b_dsp.py     # Phase B sweep over the DSP pipeline
-│   └── fixtures/              # Retained raw evidence (dsp/ = canonical DSP run)
-├── models/
-│   ├── tiny_classifier.onnx   # Exported demo model
-│   └── dsp_demo_input.txt     # Default --dsp input samples
-├── cost_table.toml            # Per-instruction energy costs (sourced)
-├── SOURCES.md                 # Cited source for every cost entry
-├── energy_aware_compiler_spec_v2.md  # Full build spec
-├── REPORT.md                  # Methodology, results, limitations
-└── README.md
-```
-
-## Testing
+Each experiment directory keeps the generated assembly, the raw Avrora reports
+and a manifest of hashes, commands and tool versions. (`phase_b` in a path is
+the repository's internal name for the periodic-scheduling experiments.)
 
 ```bash
-cmake -S compiler -B compiler/build
-cmake --build compiler/build
-ctest --test-dir compiler/build
+ctest --test-dir compiler/build                  # compiler, interpreter and pipeline tests
+python3 -m pytest sim/tests                      # reproduction and result-generation tests
+python3 sim/report_results.py                    # regenerate every result table from raw output
+python3 sim/run_dsp.py check                     # verify the retained DSP program; runs no tool
+python3 sim/run_phase_b.py reproduce-retained    # verify the ML periodic-scheduling sweep; runs no tool
+python3 sim/run_phase_b_dsp.py                   # verify the DSP periodic-scheduling sweep; runs no tool
 ```
 
-Covers: IR construction, cost table loading, candidate generation correctness (via Avrora), end-to-end output equivalence (both variants produce identical numeric results), and for the DSP path every operator plus the complete `--dsp` program, compared bit-for-bit against integer host references with the compiler's cycle prediction checked against the test interpreter. `python3 -m pytest sim/tests` covers the Phase B runner and the retained DSP baseline.
+Fresh runs with your own toolchain write to a new directory and never
+overwrite retained evidence:
 
-**Correctness principle**: A lower-energy sequence that computes the wrong answer is a failed test, full stop. Every candidate is validated against expected numeric output via Avrora.
+```bash
+JAVA_HOME=$PWD/tools/jdk8u504-b01 python3 sim/run_dsp.py capture --output-dir build/dsp_new
+python3 sim/run_dsp.py compare sim/fixtures/dsp build/dsp_new
+python3 sim/run_phase_b.py run-new --output-dir build/ml_periodic_new
+python3 sim/run_phase_b_dsp.py run-new --output-dir build/dsp_periodic_new
+```
 
-## Milestones
+## Repository structure
 
-| # | Milestone | Status |
-|---|-----------|--------|
-| 1 | Toolchain bring-up (avr-gcc + Avrora) | ✅ |
-| 2 | Minimal end-to-end, both workloads (ML `Add` + DSP `Window`, 2 candidates each) | ✅ |
-| 3 | ONNX ingestion (MatMul, Add, Relu, Requantize) | ✅ |
-| 4 | DSP builder + fixed 64-point FFT pipeline (IR only; lowering is milestone 6) | ✅ |
-| 5 | Full instruction selection + regalloc + cost-table select (locality pass not implemented) | ✅ |
-| 6 | DSP lowering + end-to-end DSP comparison | ✅ complete pipeline via `--dsp`, Avrora-verified, including under Phase B scheduling |
-| 7 | Sourcing (cost table) + write REPORT.md | ✅ cost table sourced; REPORT.md drafted |
-| — | Phase B: compiler-emitted sleep scheduling (added after the original plan) | ✅ |
+```
+compiler/           C11 compiler (CMake)
+  include/optifine/   public headers (IR, cost model, codegen)
+  src/                ingestion, DSP builder, CLI (main.c)
+  src/codegen/        lowering, candidates, selection, pricing, emission, periodic wrapper
+  tests/              CTest suite and a test-only AVR interpreter
+sim/                simulation wrapper, result generation, reproduction scripts and their tests
+  fixtures/           retained raw simulator evidence
+models/             demo classifier, its golden input/output, DSP demo input/output
+export/             PyTorch -> ONNX export of the demo classifier
+tools/              toolchain setup script (downloads JDK 8 and Avrora; not committed)
+docs/, documents/   design notes, literature survey and historical development plans
+cost_table.toml     per-instruction energy model; SOURCES.md cites every entry
+REPORT.md           method, results and limitations
+```
 
-See `energy_aware_compiler_spec_v2.md` §8 for details.
+## Validation
 
-## Non-Goals (Phase 1)
+- **Correctness:** compiled programs run in a test-only AVR interpreter and are
+  compared exactly with independent references -- the classifier against its
+  golden output, the DSP pipeline against an integer host implementation at
+  every intermediate buffer. A lower-energy sequence that computes a different
+  answer is a failed test.
+- **Cycle model:** predicted cycles equal the interpreter's count in the test
+  suite and Avrora's count for every retained program.
+- **Evidence:** retained raw output is hash-pinned by manifests, and the
+  reproduction scripts re-derive the published tables from it.
 
-| Non-Goal | Reason |
-|----------|--------|
-| Multi-ISA support (ARM Cortex-M, RISC-V) | Phase 2 |
-| Physical hardware measurement | Phase 2 (deferred, not eliminated); sim-only in Phase 1 |
-| Arbitrary-N FFT | Fixed-size only: one hardcoded length (64 points), radix-2 DIT |
-| Fingerprint hash generation | Lightweight post-processing, not the energy-relevant kernel |
-| General ONNX operator coverage | Demo model only |
-| ML/DSP compiler backend dependencies | TVM, Glow, IREE, TFLite Micro, CMSIS-DSP excluded |
-| Polished CLI/UX | Proof-of-concept pipeline only |
+## Limitations
+
+- **Simulation only.** All energy figures come from Avrora's ATmega128 power
+  model; no physical board has been measured.
+- **Uniform Active-mode cost model.** Energy is cycles times one constant,
+  because no available source supports per-instruction-type pricing.
+- **Fixed, compile-time inputs.** Each program embeds one input; runtime input
+  from a sensor or host is not implemented.
+- **Narrow workload scope.** One classifier and one fixed DSP pipeline:
+  arbitrary ONNX graphs, arbitrary FFT lengths or DSP graphs, peak-position
+  output, and a single program mixing ML and DSP are not supported.
+- **Scoped register allocation.** Register caching covers MatMul's activation
+  input only; there is no general cross-op allocator.
+- **One accepted DSP periodic-scheduling point**, with the busy-wait
+  normalization described above.
+
+## Research status and citation
+
+OptiFine is a research prototype, not production software. Its interfaces may
+change. If you use it, please cite the repository; a citation file will be
+added with the first public release. The design rationale and related work are
+in [REPORT.md](REPORT.md) and
+[documents/LITERATURE_SURVEY.md](documents/LITERATURE_SURVEY.md).
+
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 MIT, see [LICENSE](LICENSE).
-
-## Links
-
-- **Repo:** https://github.com/rugbedbugg/OptiFine
-- **Spec:** `energy_aware_compiler_spec_v2.md`
-- **Commit guidelines:** `documents/COMMIT_GUIDELINES.md`
-- **Issues:** https://github.com/rugbedbugg/OptiFine/issues
