@@ -1,0 +1,60 @@
+{
+  "artifacts": {
+    "dsp.avrora.txt": "9345590479abc124c9c71f6a03d4297774d05b815c9493977834f68e248e32a6",
+    "dsp.compile.txt": "534931925165fda938e1050290701f780865cd8d4c814ae0a70d26aaf86ab41b",
+    "dsp.ops.txt": "ff25aa657674c0694648edcf7aebb0a1d110553c7f4f90c789896d054e7f477a",
+    "dsp.s": "260583bff54b7af2b1200d701770041dc536765b3a3725f307ab34b896f7651b",
+    "dsp.size.txt": "99f7a2aa393ace4c67c1d9a0ad2c0f5e2dc6e78483467158f115c6f5ae92a211",
+    "results.csv": "5387d05965a70b6641450e1291007301721c03750af79188e13ea7c25560b86f",
+    "results.md": "2da2ab20fad9e904d4b5113a461e6142c76e4347dafba72f0c108642256ecf08"
+  },
+  "commands": {
+    "compile": [
+      "compiler/build/optifine",
+      "--dsp",
+      "--cost-table",
+      "cost_table.toml",
+      "--input",
+      "models/dsp_demo_input.txt",
+      "--out",
+      "sim/fixtures/dsp/dsp.s"
+    ],
+    "per_op_prediction": [
+      "compiler/build/tests/test_dsp_pipeline"
+    ],
+    "simulate": [
+      "bash",
+      "sim/run_avrora.sh",
+      "sim/fixtures/dsp/dsp.s"
+    ],
+    "size": [
+      "avr-size",
+      "-A",
+      "dsp.elf"
+    ]
+  },
+  "evidence_limit": "Avrora-model simulation of ATmega128 at 8 MHz; no physical hardware measurement.",
+  "generated_at": "2026-09-24T08:47:37+00:00",
+  "git": {
+    "commit": "ecb0228a1d8153af528a6d0a0d41bf2f3db7f5fd",
+    "source_dirty": false
+  },
+  "inputs": {
+    "cost_table": {
+      "path": "cost_table.toml",
+      "sha256": "c2491c08934f8c0e5ef338e4847a4909a58211654578f0c51a7eb077506a52c4"
+    },
+    "dsp_input": {
+      "path": "models/dsp_demo_input.txt",
+      "sha256": "63761d11053d151b3f77b42d1d52bcb647fdfa4f7296656b191b96aedc458986"
+    }
+  },
+  "schema": "dsp-baseline-v1",
+  "tools": {
+    "avr_gcc": "avr-gcc (GCC) 16.1.0",
+    "avr_size": "GNU size (GNU Binutils) 2.47.20260726",
+    "avrora_jar_sha256": "016021f49d922e73df4d295c05d11fb6aeabdce11974581caadf65387eb1e3eb",
+    "compiler_sha256": "40feb6e0894ece35b6d0cdd17409b2d06edd68d856d565c1e27bb9eeb5c4859e",
+    "java": "openjdk version \"1.8.0_504\""
+  }
+}

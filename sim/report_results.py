@@ -9,6 +9,10 @@ Every number this prints is computed here from a retained raw file:
            differential ``E(count=5) - E(count=4)`` per variant, which cancels
            one-time initialisation and the two policies' different wrapper
            lengths.
+  DSP      from ``sim/fixtures/dsp/`` -- the complete ``optifine --dsp``
+           program's Avrora report, the compiler's own cost printout,
+           ``avr-size -A`` of the linked ELF, and ``test_dsp_pipeline``'s
+           per-op prediction, captured by ``sim/run_dsp.py``.
 
 Nothing here runs a tool, writes into ``sim/fixtures``, or consults a manifest.
 It reads raw simulator output and does arithmetic, so a figure in the report
@@ -32,6 +36,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "sim" / "fixtures"
 PHASE_B = FIXTURES / "phase_b"
+DSP = FIXTURES / "dsp"
+
+#: Target clock and memory sizes the DSP figures are expressed against.
+CLOCK_HZ = 8_000_000
+FLASH_BYTES = 128 * 1024
+SRAM_BYTES = 4096
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # Prescaler 8 is excluded from the accepted set by a static deadline check
@@ -61,9 +71,16 @@ class MissingArtifact(RuntimeError):
     pass
 
 
+def _shown(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def _read(path: Path) -> str:
     if not path.is_file():
-        raise MissingArtifact(f"missing raw artifact: {path.relative_to(ROOT)}")
+        raise MissingArtifact(f"missing raw artifact: {_shown(path)}")
     return ANSI.sub("", path.read_text(encoding="utf-8", errors="replace"))
 
 
@@ -75,7 +92,7 @@ def parse_energy(path: Path) -> dict[str, float | int]:
     active = re.search(r"Active:\s*([0-9.eE+-]+)\s*Joule,\s*(\d+)\s*cycles", text)
     save = re.search(r"Power Save:\s*([0-9.eE+-]+)\s*Joule,\s*(\d+)\s*cycles", text)
     if not (cycles and cpu and active):
-        raise MissingArtifact(f"unparseable Avrora report: {path.relative_to(ROOT)}")
+        raise MissingArtifact(f"unparseable Avrora report: {_shown(path)}")
     return {
         "cycles": int(cycles.group(1)),
         "cpu_nj": float(cpu.group(1)) * 1e9,
@@ -140,7 +157,159 @@ def phase_b() -> list[dict[str, object]]:
     return rows
 
 
-def render_markdown(a: dict[str, object], b: list[dict[str, object]]) -> str:
+def _need(match: re.Match | None, what: str, path: Path) -> re.Match:
+    if not match:
+        raise MissingArtifact(f"{what} not found in {_shown(path)}")
+    return match
+
+
+def dsp(directory: Path = DSP) -> dict[str, object]:
+    """The complete DSP program's figures, from the raw files of one capture.
+
+    Cross-checks rather than trusts: the per-op predictions must sum to the
+    compiler's total, that total must equal Avrora's cycles, and the per-op
+    code bytes plus the twiddle table must equal the linked .text size.
+    """
+    sim = parse_energy(directory / "dsp.avrora.txt")
+
+    cp = directory / "dsp.compile.txt"
+    compile_text = _read(cp)
+    region = lambda label: int(_need(re.search(rf"^dsp {label}[^:]*:\s*(\d+) cycles", compile_text, re.M),
+                                     f"'dsp {label}' line", cp).group(1))
+    predicted = int(_need(re.search(r"^total:\s*(\d+) cycles,\s*([0-9.]+) nJ", compile_text, re.M),
+                          "'total:' line", cp).group(1))
+    predicted_nj = float(re.search(r"^total:\s*\d+ cycles,\s*([0-9.]+) nJ", compile_text, re.M).group(1))
+    sram = int(_need(re.search(r"^sram:\s*(\d+) bytes", compile_text, re.M), "'sram:' line", cp).group(1))
+
+    sp = directory / "dsp.size.txt"
+    size_text = _read(sp)
+    section = lambda name: int(m.group(1)) if (m := re.search(rf"^\{name}\s+(\d+)\s", size_text, re.M)) else 0
+    text, data, bss = section(".text"), section(".data"), section(".bss")
+    if text == 0:
+        raise MissingArtifact(f".text not found in {_shown(sp)}")
+
+    op_path = directory / "dsp.ops.txt"
+    ops_text = _read(op_path)
+    ops = [(m.group(1).strip(), int(m.group(2)), int(m.group(3)), int(m.group(5)))
+           for m in re.finditer(r"^    (\S.*?)\s+(\d+)\s+(\d+) B (\+ data|      ) +(\d+)$", ops_text, re.M)]
+    table = int(_need(re.search(r"^      \(table data\)\s+(\d+) B$", ops_text, re.M),
+                      "table data line", op_path).group(1))
+    if not ops:
+        raise MissingArtifact(f"per-op lines not found in {_shown(op_path)}")
+
+    op_cycles = sum(o[3] for o in ops)
+    code = sum(o[2] for o in ops)
+    checks = {
+        "per-op prediction sums to the compiler total": op_cycles == predicted,
+        "compiler total equals Avrora cycles": predicted == sim["cycles"],
+        "per-op code + table equals linked .text": code + table == text,
+        "Avrora active cycles cover the whole run": sim["active_cycles"] == sim["cycles"],
+    }
+    failed = [k for k, ok in checks.items() if not ok]
+    if failed:
+        raise MissingArtifact("inconsistent DSP capture: " + "; ".join(failed))
+
+    group = lambda names: sum(o[3] for o in ops if o[0] in names)
+    fft = [o for o in ops if o[0].startswith("FFT ")]
+    breakdown = [
+        ("Input/Const setup (clr r2, embedded input, window coefficients)", group({"clr r2", "Input", "Const"}),
+         sum(o[2] for o in ops if o[0] in {"clr r2", "Input", "Const"})),
+        ("Window", group({"Window"}), sum(o[2] for o in ops if o[0] == "Window")),
+        ("BitReverse", group({"BitReverse"}), sum(o[2] for o in ops if o[0] == "BitReverse")),
+        (f"FFT (x{len(fft)} stages)", sum(o[3] for o in fft), sum(o[2] for o in fft)),
+        ("Magnitude", group({"Magnitude"}), sum(o[2] for o in ops if o[0] == "Magnitude")),
+        ("PeakExtract", group({"PeakExtract"}), sum(o[2] for o in ops if o[0] == "PeakExtract")),
+        ("Output", group({"Output"}), sum(o[2] for o in ops if o[0] == "Output")),
+        ("break (+ twiddle table data)", group({"break + twiddle table"}),
+         sum(o[2] for o in ops if o[0] == "break + twiddle table") + table),
+    ]
+    assert sum(r[1] for r in breakdown) == predicted and sum(r[2] for r in breakdown) == text
+
+    return {
+        "cycles": sim["cycles"],
+        "cpu_nj": sim["cpu_nj"],
+        "per_cycle_nj": sim["cpu_nj"] / sim["cycles"],
+        "time_ms": 1000.0 * sim["cycles"] / CLOCK_HZ,
+        "predicted_cycles": predicted,
+        "predicted_nj": predicted_nj,
+        "error_cycles": sim["cycles"] - predicted,
+        "initialization_cycles": region("initialization"),
+        "pipeline_cycles": region("pipeline"),
+        "termination_cycles": region("termination"),
+        "text": text, "data": data, "bss": bss,
+        "flash_pct": 100.0 * (text + data) / FLASH_BYTES,
+        "sram_bytes": sram,
+        "sram_pct": 100.0 * sram / SRAM_BYTES,
+        "sram_free": SRAM_BYTES - sram,
+        "table_bytes": table,
+        "ops": ops,
+        "breakdown": breakdown,
+    }
+
+
+def render_dsp_markdown(d: dict[str, object], directory: Path = DSP, a: dict[str, object] | None = None) -> str:
+    o = StringIO()
+    w = o.write
+    w("## DSP: complete 64-point Q15 pipeline\n\n")
+    w(f"Derived from the raw files in `{_shown(directory)}` (captured by `sim/run_dsp.py`\n")
+    w("from `optifine --dsp` on `models/dsp_demo_input.txt`). Energy is Avrora-model\n")
+    w(f"**simulated** active energy at {CLOCK_HZ // 1_000_000} MHz; time is cycles divided by that clock. Neither\n")
+    w("is a physical measurement.\n\n")
+    w("| metric | value |\n|---|---:|\n")
+    w(f"| Cycles (Avrora) | {d['cycles']:,} |\n")
+    w(f"| Cycles (compiler prediction) | {d['predicted_cycles']:,} |\n")
+    w(f"| Prediction error | {d['error_cycles']:+,} cycles |\n")
+    w(f"| Time @ {CLOCK_HZ // 1_000_000} MHz | {d['time_ms']:.3f} ms |\n")
+    w(f"| Simulated active energy (Avrora) | {d['cpu_nj']:,.2f} nJ ({d['cpu_nj'] / 1000:,.2f} µJ) |\n")
+    w(f"| Implied Active cost | {d['per_cycle_nj']:.7f} nJ/cycle |\n")
+    w(f"| Linked flash (.text + .data) | {d['text'] + d['data']:,} B ({d['flash_pct']:.1f}% of {FLASH_BYTES // 1024} KiB) |\n")
+    w(f"| .text / .data / .bss | {d['text']:,} / {d['data']:,} / {d['bss']:,} B |\n")
+    w(f"| SRAM (graph tensors + scratch) | {d['sram_bytes']:,} B ({d['sram_pct']:.1f}% of {SRAM_BYTES:,} B, "
+      f"{d['sram_free']:,} B free) |\n\n")
+    w(f"The compiler's own estimate, {d['predicted_nj']:,.3f} nJ, prices the same cycles at\n")
+    w("`cost_table.toml`'s rounded 2.8375 nJ/cycle; the table above uses Avrora's reported energy.\n\n")
+    w("### Where the cycles and bytes go (compiler prediction, per op)\n\n")
+    w("| part | cycles | % of cycles | code bytes |\n|---|---:|---:|---:|\n")
+    for name, cyc, size in d["breakdown"]:
+        w(f"| {name} | {cyc:,} | {100.0 * cyc / d['cycles']:.2f}% | {size:,} |\n")
+    w(f"| **total** | **{d['predicted_cycles']:,}** | 100.00% | **{d['text']:,}** |\n\n")
+    w("The setup row is production code, not harness: the program embeds its 64 input\n")
+    w("samples and 64 window coefficients at compile time, as the ML path embeds its\n")
+    w("demo input. The break row's bytes include the 128-byte twiddle table after it.\n")
+    if a is not None:
+        p = a["optimized"]
+        w("\n### ML and DSP side by side\n\n")
+        w("The two workloads compute different things, so this shows the backend's breadth,\n")
+        w("not the relative efficiency of the two algorithms.\n\n")
+        w("| | ML classifier (optimized) | DSP pipeline |\n|---|---:|---:|\n")
+        w(f"| Cycles | {p['cycles']:,} | {d['cycles']:,} |\n")
+        w(f"| Time @ {CLOCK_HZ // 1_000_000} MHz | {1000.0 * p['cycles'] / CLOCK_HZ:.3f} ms | {d['time_ms']:.3f} ms |\n")
+        w(f"| Simulated active energy | {p['cpu_nj']:,.2f} nJ | {d['cpu_nj']:,.2f} nJ |\n")
+    return o.getvalue()
+
+
+def render_dsp_csv(d: dict[str, object]) -> str:
+    o = StringIO()
+    wr = csv.writer(o, lineterminator="\n")
+    wr.writerow(["phase", "metric", "variant", "prescaler", "value", "unit"])
+    for key, value, unit in (
+        ("cycles", d["cycles"], "cycles"),
+        ("predicted_cycles", d["predicted_cycles"], "cycles"),
+        ("prediction_error", d["error_cycles"], "cycles"),
+        ("time", f"{d['time_ms']:.6f}", "ms"),
+        ("cpu_energy", f"{d['cpu_nj']:.6f}", "nJ"),
+        ("per_cycle_active", f"{d['per_cycle_nj']:.7f}", "nJ/cycle"),
+        ("text", d["text"], "B"), ("data", d["data"], "B"), ("bss", d["bss"], "B"),
+        ("sram", d["sram_bytes"], "B"),
+    ):
+        wr.writerow(["DSP", key, "complete", "", value, unit])
+    for name, cyc, size in d["breakdown"]:
+        wr.writerow(["DSP", "part_cycles", name, "", cyc, "cycles"])
+        wr.writerow(["DSP", "part_code_bytes", name, "", size, "B"])
+    return o.getvalue()
+
+
+def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[str, object] | None = None) -> str:
     o = StringIO()
     w = o.write
     w("# OptiFine results (generated)\n\n")
@@ -184,10 +353,13 @@ def render_markdown(a: dict[str, object], b: list[dict[str, object]]) -> str:
     w("\nPhase A's cycle saving is worth a fixed amount per inference under sleep\n")
     w("scheduling and **exactly zero** under busy-wait, where finishing sooner\n")
     w("only buys more polling at the same total energy.\n")
+    if d is not None:
+        w("\n")
+        w(render_dsp_markdown(d, DSP, a))
     return o.getvalue()
 
 
-def render_csv(a: dict[str, object], b: list[dict[str, object]]) -> str:
+def render_csv(a: dict[str, object], b: list[dict[str, object]], d: dict[str, object] | None = None) -> str:
     o = StringIO()
     wr = csv.writer(o, lineterminator="\n")
     wr.writerow(["phase", "metric", "variant", "prescaler", "value", "unit"])
@@ -205,6 +377,8 @@ def render_csv(a: dict[str, object], b: list[dict[str, object]]) -> str:
                           ("sleep_saved_nj", "nJ"), ("sleep_saving_pct", "%"),
                           ("compiler_delta_nj", "nJ"), ("compiler_delta_active_nj", "nJ")):
             wr.writerow(["B", key, "optimized", pre, f"{r[key]:.6f}", unit])
+    if d is not None:
+        o.write(render_dsp_csv(d).split("\n", 1)[1])
     return o.getvalue()
 
 
@@ -215,11 +389,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-dir", type=Path, help="write results.md and results.csv here")
     args = ap.parse_args(argv)
     try:
-        a, b = phase_a(), phase_b()
+        a, b, d = phase_a(), phase_b(), dsp()
     except MissingArtifact as error:
         print(f"report_results: {error}", file=sys.stderr)
         return 2
-    md, cs = render_markdown(a, b), render_csv(a, b)
+    md, cs = render_markdown(a, b, d), render_csv(a, b, d)
     if args.out_dir:
         args.out_dir.mkdir(parents=True, exist_ok=True)
         (args.out_dir / "results.md").write_text(md, encoding="utf-8")

@@ -1,0 +1,27 @@
+phase,metric,variant,prescaler,value,unit
+DSP,cycles,complete,,148335,cycles
+DSP,predicted_cycles,complete,,148335,cycles
+DSP,prediction_error,complete,,0,cycles
+DSP,time,complete,,18.541875,ms
+DSP,cpu_energy,complete,,420902.416688,nJ
+DSP,per_cycle_active,complete,,2.8375125,nJ/cycle
+DSP,text,complete,,12800,B
+DSP,data,complete,,0,B
+DSP,bss,complete,,0,B
+DSP,sram,complete,,2517,B
+DSP,part_cycles,"Input/Const setup (clr r2, embedded input, window coefficients)",,769,cycles
+DSP,part_code_bytes,"Input/Const setup (clr r2, embedded input, window coefficients)",,1538,B
+DSP,part_cycles,Window,,2560,cycles
+DSP,part_code_bytes,Window,,4608,B
+DSP,part_cycles,BitReverse,,896,cycles
+DSP,part_code_bytes,BitReverse,,1792,B
+DSP,part_cycles,FFT (x6 stages),,73512,cycles
+DSP,part_code_bytes,FFT (x6 stages),,4230,B
+DSP,part_cycles,Magnitude,,51590,cycles
+DSP,part_code_bytes,Magnitude,,246,B
+DSP,part_cycles,PeakExtract,,18943,cycles
+DSP,part_code_bytes,PeakExtract,,128,B
+DSP,part_cycles,Output,,64,cycles
+DSP,part_code_bytes,Output,,128,B
+DSP,part_cycles,break (+ twiddle table data),,1,cycles
+DSP,part_code_bytes,break (+ twiddle table data),,130,B
