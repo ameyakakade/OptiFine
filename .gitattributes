@@ -29,3 +29,8 @@ models/tiny_classifier_golden_output.txt text eol=crlf
 # hashed with.
 models/dsp_demo_input.txt text eol=lf
 sim/fixtures/dsp/* text eol=lf
+models/dsp_demo_golden_output.txt text eol=lf
+# The DSP Phase B sweep: sim/fixtures/phase_b_dsp/manifest.json hashes these
+# as LF bytes. The ELFs next to them are rebuilt, never committed.
+sim/fixtures/phase_b_dsp/* text eol=lf
+sim/fixtures/phase_b_dsp/*.elf binary
