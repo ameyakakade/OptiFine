@@ -13,6 +13,7 @@ authors:
   - given-names: Partha Pratim
     family-names: Gogoi
 version: 0.1.0
+repository-code: https://github.com/rugbedbugg/OptiFine-AVR
 license: MIT
 keywords:
   - energy-aware compilation
