@@ -60,7 +60,11 @@ def sha256_file(path: Path) -> str:
 
 
 def rel(path: Path) -> str:
-    return path.resolve().relative_to(ROOT).as_posix()
+    """Repo-relative for paths in the repository, else the absolute path."""
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path.resolve())
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:

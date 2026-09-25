@@ -107,10 +107,16 @@ def utc_now() -> str:
 
 
 def path_for_manifest(path: Path) -> str:
-    try:
-        return path.resolve().relative_to(ROOT).as_posix()
-    except ValueError:
-        return str(path.resolve())
+    """Repo-relative when the path lies inside the repository. The unresolved
+    absolute path is tried first, so a symlink inside the repository (say
+    tools/avrora.jar pointing elsewhere) is recorded by its repository name
+    rather than by its target."""
+    for candidate in (Path(os.path.abspath(path)), path.resolve()):
+        try:
+            return candidate.relative_to(ROOT).as_posix()
+        except ValueError:
+            continue
+    return str(path.resolve())
 
 
 def relative(command: Sequence[str]) -> list[str]:
@@ -119,8 +125,8 @@ def relative(command: Sequence[str]) -> list[str]:
     out = []
     for token in command:
         path = Path(token)
-        out.append(path_for_manifest(path) if path.is_absolute() and path.resolve().is_relative_to(ROOT)
-                   else token)
+        recorded = path_for_manifest(path) if path.is_absolute() else token
+        out.append(recorded if not Path(recorded).is_absolute() else token)
     return out
 
 
@@ -220,7 +226,7 @@ def _required_path(label: str, requested: str | None, candidates: Iterable[Path]
     choices = [Path(requested)] if requested else list(candidates)
     for candidate in choices:
         if candidate.is_file():
-            return candidate.resolve()
+            return Path(os.path.abspath(candidate))
     formatted = ", ".join(str(choice) for choice in choices)
     raise ToolDiscoveryError(f"could not locate {label}; checked: {formatted}")
 
