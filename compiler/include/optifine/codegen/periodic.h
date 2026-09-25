@@ -28,9 +28,9 @@ typedef struct {
  * and periodic execution must request at least one inference. */
 int periodic_options_validate(const PeriodicOptions *options);
 
-/* Validates the scheduling request and reserves four scheduler bytes after
- * the tensor layout. Task 3 adds the matched active/Power-save AVR wrapper
- * emission to this interface. */
+/* Validates the scheduling request, reserves four scheduler bytes after
+ * the tensor layout, and emits the matched busy-wait/Power-save AVR
+ * wrapper. */
 int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout,
                                   const RegAllocResult *regalloc, const CostModel *cost_model,
                                   const int8_t *demo_input, size_t demo_input_len,

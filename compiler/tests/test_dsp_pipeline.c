@@ -495,7 +495,7 @@ static void report_program(Fx *f) {
     free_parts(&p);
 }
 
-/* ---------------------------------------------------- Phase B periodic */
+/* ------------------------------------------------ periodic scheduling */
 
 /* Lines of `text` between two marker comments, instructions only (as
  * instruction_lines keeps them), or of the whole text if a marker is NULL. */

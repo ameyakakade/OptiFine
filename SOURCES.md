@@ -4,10 +4,10 @@ Every entry in `cost_table.toml` must be justified by an entry here before
 it is treated as real. As of the cost-table sourcing pass no `PLACEHOLDER`
 entries remain: all 9 table entries carry an Avrora-derived figure and a
 citation. No physically-measured numbers are
-permitted anywhere in this project (see spec section 3) -- only cited
-published figures (datasheet, paper) or Avrora's simulated energy monitor.
+used anywhere in this project -- only cited published figures (datasheet,
+paper) or Avrora's simulated energy monitor.
 
-## Methodology (see spec v2 section 12 for the full finding)
+## Methodology
 
 No source available to this project -- not the official AVR datasheets
 (which publish only aggregate Active/Idle/Power-down current vs. clock
@@ -34,35 +34,35 @@ variation exists for this MCU class.
 
 ### Per-cycle energy constant
 
-**Superseded 2026-08-27 (spec v2 section 13):** an earlier version of this
-file derived the per-cycle constant from the ATmega128 datasheet's Active
-8MHz/5V row (17mA typical, giving 10.625 nJ/cycle). The first real
-end-to-end run through Avrora (`sim/fixtures/classifier_naive.s` -> real
-`.elf` -> `sim/run_avrora.sh`) showed predicted and real *cycle* counts
-matching almost exactly (6129 predicted vs. 6130 simulated -- the +1 is
-known fixed harness overhead, see `bringup_smoke.avrora.txt`), but
+**Superseded datasheet constant:** an earlier version of this file derived
+the per-cycle constant from the ATmega128 datasheet's Active 8MHz/5V row
+(17mA typical, giving 10.625 nJ/cycle). The first real end-to-end run of the
+naive classifier through Avrora showed predicted and real *cycle* counts
+matching almost exactly (6129 predicted vs. 6130 simulated -- the +1 is the
+fixed harness overhead of the final `break`, see
+`sim/fixtures/active_ml/smoke.avrora.txt`), but
 predicted and real *energy* diverging by a factor of ~3.75x (65,120.625 nJ
 predicted vs. 17,393.951625 nJ simulated). That ruled out a bug in cycle
 accounting and pointed at the per-cycle constant itself.
 
 Decompiling `avrora.jar`'s `avrora.sim.mcu.ATMega128.class` (via `jar xf`
-+ `javap -v`, both part of the Zulu 8 JDK already used to run Avrora)
++ `javap -v`, both part of the JDK 8 already used to run Avrora)
 found the constant pool holds seven `double` current values for the
 ATmega128's power states; the largest (0.0075667, i.e. 7.5667mA) is Active
 mode. `avrora.sim.energy.Energy.class`'s constant pool holds `3.0d`, the
 assumed supply voltage. `3.0V x 0.0075667A / 8,000,000 Hz = 2.8375125E-9 J
 = 2.8375 nJ/cycle` (rounded) matches Avrora's real simulated energy
 divided by real simulated cycles to full floating-point precision, on two
-independently-generated programs (`bringup_smoke.s`: 22.7001 nJ / 8 cycles
-= 2.8375125; `classifier_naive.s`: 17393.951625 nJ / 6130 cycles =
-2.8375125000000003).
+independently-generated programs (`sim/smoke.s`: 22.7001 nJ / 8 cycles
+= 2.8375125; the naive classifier, `sim/fixtures/active_ml/naive.s`:
+17393.951625 nJ / 6130 cycles = 2.8375125000000003).
 
 - **Source:** Avrora Beta 1.7.115, `avrora.sim.mcu.ATMega128.class` and
   `avrora.sim.energy.Energy.class` (decompiled bytecode constant pool;
   `avrora.jar` ships no readable source or resource file with these
   values, only compiled `.class` files -- see reproduction steps below).
 - **Why this constant instead of the datasheet's:** Avrora is this
-  project's simulation reference (spec section on tooling) -- every
+  project's simulation reference -- every
   reported cycle/energy number in REPORT.md ultimately comes from Avrora's
   simulation, not from the compiler's own predicted numbers. Calibrating
   `cost_table.toml` to Avrora's own internal assumption makes the
@@ -81,8 +81,8 @@ independently-generated programs (`bringup_smoke.s`: 22.7001 nJ / 8 cycles
   javap -v avrora/sim/mcu/ATMega128.class | grep "= Double"` (lists the
   seven current constants) `&& javap -v avrora/sim/energy/Energy.class |
   grep "= Double"` (lists the voltage constant, `3.0d`, among others).
-  Requires a JDK's `jar`/`javap` tools (used here from the same Zulu 8
-  JDK `sim/run_avrora.sh` already requires).
+  Requires a JDK's `jar`/`javap` tools (the JDK 8 `sim/run_avrora.sh`
+  already requires has both).
 - **Derivation:** `energy_per_cycle = V x I / f = 3.0V x 0.0075667A /
   8,000,000 Hz = 2.8375125E-9 J = 2.8375 nJ` (rounded to 4 significant
   figures, matching this project's existing rounding convention).

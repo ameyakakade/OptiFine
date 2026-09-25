@@ -62,7 +62,7 @@ void fmt_hi8(char *out, uint16_t addr);
  *
  * The DSP path cannot be lowered as straight-line code: fully unrolling the
  * 64-point pipeline needs ~497 KB against the ATmega128's 128 KB of flash
- * (measured, not estimated -- see the milestone 6 pre-flight). These emit a
+ * (measured by assembling it with avr-gcc, not estimated). These emit a
  * counted loop instead, so the body is emitted once and executed `trip`
  * times.
  *
@@ -142,7 +142,7 @@ void fmt_hi8_sym(char *out, const char *symbol, int offset);
  * buf->items. Returns 0 on success, -1 (with an error printed) if any
  * instruction has no cost-category mapping or no cost_table.toml entry.
  * Every cost_table.toml entry is cycles x a single per-cycle constant (see
- * SOURCES.md's "Per-cycle energy constant" section, spec v2 section 13);
+ * SOURCES.md's "Per-cycle energy constant" section);
  * `cycles` is derived from energy rather than tracked separately, so the
  * 2.8375 constant here MUST be kept in sync with cost_table.toml's actual
  * per-cycle value. */

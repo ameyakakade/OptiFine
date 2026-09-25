@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Sets up the AVR/Avrora toolchain on Linux. Idempotent -- safe to re-run.
 #
+# Tested versions: Avrora Beta 1.7.115, Temurin JDK 8u504-b01, avr-gcc 16.1.0
+# (any avr-gcc that assembles for atmega128 should do: the compiler emits the
+# assembly, avr-gcc only assembles and links it).
+#
 # What this does NOT need root for (downloaded into tools/, gitignored):
 #   - avrora.jar (Avrora Beta 1.7.115, exact version pinned -- REPORT.md's
 #     and SOURCES.md's decompiled power-model constants are specific to
@@ -15,10 +19,7 @@
 # on at least the Arch `extra/avr-gcc` package, and does not honor -B,
 # COMPILER_PATH, or PATH overrides for that lookup (confirmed empirically
 # in this project -- a relocated copy links avr-as fine but collect2 still
-# reports "cannot find 'ld'"). A real system install is the only path that
-# is reliably correct in this project's own compile-and-verify standard --
-# working around it with bind-mount tricks would be exactly the kind of
-# unverified assumption this project avoids elsewhere.
+# reports "cannot find 'ld'"), so a system package is used instead.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,14 +64,16 @@ else
         "https://sourceforge.net/projects/avrora/files/avrora-beta-1.7.115.jar/download"
     echo "installed: $TOOLS/avrora.jar"
 fi
-BANNER="$("$JDK8_DIR/bin/java" -jar "$TOOLS/avrora.jar" -help 2>&1 | head -1)"
-echo "version check: $BANNER"
-case "$BANNER" in
-    *"Beta 1.7.115"*) ;;
-    *) echo "WARNING: expected 'Beta 1.7.115' in the banner above -- the" \
-            "downloaded jar does not match the version this project's" \
-            "energy constants were calibrated against." >&2 ;;
-esac
+# The jar this project's energy constants and retained evidence were
+# produced with (sim/fixtures/*/manifest.json record the same digest).
+AVRORA_SHA256="016021f49d922e73df4d295c05d11fb6aeabdce11974581caadf65387eb1e3eb"
+if echo "$AVRORA_SHA256  $TOOLS/avrora.jar" | sha256sum -c --status; then
+    echo "sha256 ok: $AVRORA_SHA256"
+else
+    echo "WARNING: tools/avrora.jar does not have the expected SHA-256" \
+         "($AVRORA_SHA256); it is not the Beta 1.7.115 build this project's" \
+         "energy constants were calibrated against." >&2
+fi
 
 echo
 echo "== summary =="
@@ -78,6 +81,6 @@ echo "AVR_GCC     : $(command -v avr-gcc || echo 'not found -- install per above
 echo "JAVA8_BIN   : $JDK8_DIR/bin/java"
 echo "AVRORA_JAR  : $TOOLS/avrora.jar"
 echo
-echo "sim/run_phase_b.py and sim/run_avrora.sh auto-discover these three" \
+echo "sim/run_avrora.sh and the sim/run_*.py scripts auto-discover these three" \
      "under tools/ and via PATH; override any of them with the AVR_GCC," \
      "JAVA8_BIN, or AVRORA_JAR environment variables."

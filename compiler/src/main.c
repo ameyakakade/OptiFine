@@ -97,7 +97,7 @@ static int8_t *read_dsp_input(const char *path, size_t *out_len) {
 }
 
 /* The periodic cost lines, shared by the ML and --dsp periodic modes;
- * sim/run_phase_b*.py parse them. */
+ * sim/run_periodic_*.py parse them. */
 static void print_periodic_cost(const PeriodicOptions *options, const PeriodicProgramCost *cost) {
     fprintf(stderr, "periodic policy: %s\n", options->policy == WAIT_ACTIVE ? "active" : "powersave");
     fprintf(stderr, "periodic timer prescaler: %u (Timer0 divisor)\n", options->timer_prescaler);
@@ -142,7 +142,7 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
     if (!out) {
         fprintf(stderr, "failed to open output file: %s\n", out_path);
     } else if (periodic) {
-        /* Phase B: the same DSP initialization and body inside the periodic
+        /* Periodic scheduling: the same DSP initialization and body inside the periodic
          * wrapper the ML path uses. */
         PeriodicProgramCost cost;
         rc = codegen_emit_periodic_program(&graph, &layout, &regalloc, &cost_model, input, input_len,
@@ -353,7 +353,7 @@ int main(int argc, char **argv) {
     RegAllocResult regalloc;
     /* Real next-use analysis (see regalloc.h) -- only meaningfully consulted
      * when --optimized routes through candidates_generate; the naive path
-     * (lower_op) ignores it and always spills, matching Phase A. */
+     * (lower_op) ignores it and always spills, as the naive baseline does. */
     regalloc_next_use(&graph, &regalloc);
 
     FILE *out = fopen(out_path, "w");

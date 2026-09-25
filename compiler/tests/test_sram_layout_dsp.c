@@ -27,7 +27,7 @@ static void test_dsp_graph_layout_succeeds_and_reserves_scratch(void) {
     }
 
     /* The scratch region sits after every real op's tensor storage and
-     * fits inside the SRAM budget with room for Task 12's periodic
+     * fits inside the SRAM budget with room for the periodic wrapper's
      * scheduler bytes on top. */
     assert(layout.dsp_scratch_addr >= SRAM_LAYOUT_BASE + layout.bytes_used - DSP_SCRATCH_BYTES);
     assert((uint32_t)layout.dsp_scratch_addr + DSP_SCRATCH_BYTES <= (uint32_t)SRAM_LAYOUT_LIMIT);

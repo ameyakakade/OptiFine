@@ -1,30 +1,34 @@
-# OptiFine: Energy-Aware Code Generation for Resource-Constrained AVR Targets -- Technical Report
+# OptiFine: Energy-Aware Code Generation for Resource-Constrained AVR Targets
 
-Status: research prototype. This report covers the compiler's two
-evaluated workloads -- an INT8 classifier ingested from ONNX and a 64-point
-Q15 DSP pipeline -- and its two energy mechanisms: active-mode optimization
-(choosing instruction sequences, including next-use register caching) and
-periodic power-aware scheduling (sleeping between periodic runs instead of
-busy-waiting). Every result comes from the compiler's own output simulated
-in Avrora; none is a physical measurement.
+Technical report, OptiFine 0.1.0.
 
-The DSP pipeline compiles to one AVR program that Avrora runs in exactly
-the 148,335 cycles the compiler predicts, and whose every intermediate
-buffer matches an independent integer host reference; its results, including
-under periodic scheduling, are in "DSP Workload" below.
-
-Every figure in this report is regenerated from raw Avrora output by
-`python3 sim/report_results.py`, not transcribed by hand.
-
-`documents/PHASE_B_NOTES.md` has the exploratory research trail that
-preceded periodic scheduling's implementation (which sleep modes Avrora can
-and can't simulate, and why); `documents/PHASE_B_PLAN.md` has its historical
-task breakdown; `documents/LITERATURE_SURVEY.md` has the full related-work
-positioning summarized in this report's periodic-scheduling section below.
-(`PHASE_B` in file and directory names is the project's internal name for
-periodic scheduling.)
+Status: research prototype. This report covers the compiler's two evaluated
+workloads -- an INT8 classifier ingested from ONNX and a 64-point Q15 DSP
+pipeline -- and its two energy mechanisms: active-mode optimization (choosing
+instruction sequences, including next-use register caching) and periodic
+power-aware scheduling (sleeping between periodic runs instead of
+busy-waiting). Every result comes from the compiler's own output simulated in
+Avrora; none is a physical measurement. Every figure is regenerated from the
+retained raw Avrora output by `python3 sim/report_results.py`, not
+transcribed by hand.
 
 ## Abstract
+
+On an AVR ATmega128 model, energy-aware instruction selection reduces
+exactly to cycle reduction: every instruction's energy is its cycle count
+times one constant, and the optimizer's 1.83% simulated saving on an INT8
+classifier is a pure cycle saving. Latency stops being a proxy for energy
+once the compiler schedules sleep: with periodic Power-save scheduling, an
+idle cycle costs 61.2 times less than an Active one, the classifier saves
+up to 96.33% per period against busy-waiting, and the same 112-cycle
+active-mode saving is worth 312.606 nJ per period under sleep scheduling
+and exactly zero under busy-wait. A second, structurally different workload
+-- a 64-point Q15 FFT pipeline compiled to 12,800 bytes, whose 148,335
+simulated cycles the compiler predicts exactly -- saves 42.97% under the
+same scheduling, because its body fills 56% of the period. All results are
+simulated; hardware validation is future work.
+
+## Motivation
 
 In 2021, Heim, Biri, Qu and Thiele measured neural-network inference across
 a range of ARM Cortex-M microcontrollers (STM32 L4/F4/F7) with an external
@@ -40,63 +44,66 @@ of that equivalence. The finding is that it holds precisely as long as the
 processor never leaves Active mode — and fails the moment it does.
 
 The project does not dispute their measurement. Its active-mode
-optimization corroborates it: an energy-cost model driving instruction selection and
-next-use register allocation reduces exactly to cycles times a constant,
-and its 1.83% simulated saving is a pure cycle reduction — the only lever
-their regime predicts is available. The divergence appears with periodic
-power-aware scheduling, where the compiler itself schedules sleep-state
-entry around a periodic workload. On a calibrated ATmega128 model, an Active cycle costs
-2.8375 nJ and a Power-save cycle 0.0464 nJ — a ratio of 61.2x. Latency and
-energy decouple: idle duration is unbounded while its energy cost is
-bounded by sleep current, yielding 96.3% savings at a ~98% idle fraction.
-The two mechanisms also interact — the 112-cycle active-mode saving is
-worth 312.6 nJ per inference under sleep scheduling and exactly zero under
-busy-wait, making the sleep-aware compiler the precondition for the
-instruction-level optimization being observable at all.
+optimization corroborates it: an energy-cost model driving instruction
+selection and next-use register allocation reduces exactly to cycles times a
+constant, and its 1.83% simulated saving is a pure cycle reduction — the
+only lever their regime predicts is available. The divergence appears with
+periodic power-aware scheduling, where the compiler itself schedules
+sleep-state entry around a periodic workload. On a calibrated ATmega128
+model, an Active cycle costs 2.8375 nJ and a Power-save cycle 0.0464 nJ — a
+ratio of 61.2x. Latency and energy decouple: idle duration is unbounded while
+its energy cost is bounded by sleep current, yielding 96.3% savings at a ~98%
+idle fraction. The two mechanisms also interact — the 112-cycle active-mode
+saving is worth 312.6 nJ per inference under sleep scheduling and exactly
+zero under busy-wait, making the sleep-aware compiler the precondition for
+the instruction-level optimization being observable at all.
 
 The same backend targets two structurally different workload classes —
 INT8 neural-network inference and a fixed-point streaming DSP pipeline
 (64-point FFT, Q15) — so the result can be tested against computational
-shape rather than a single benchmark. The complete DSP pipeline compiles
-to a 12,800-byte ATmega128 program whose simulated cycle count the
-compiler predicts exactly. Under the same sleep scheduling it saves 43%
-per period where the ML classifier saves 96%, at the same period: the
-DSP body keeps the processor busy for 56% of it, the classifier for about
-2%, which is exactly the duty-cycle dependence the abstract describes.
+shape rather than a single benchmark.
 
 This is a structural argument about the generality of a claim, not a
 competing measurement: it is established in a cycle-accurate simulator,
-whereas the result it contests was taken on physical hardware. Closing
-that gap — on both AVR silicon and an STM32 target of the same
-architectural family Heim et al. measured — is future work.
+whereas the result it contests was taken on physical hardware. Closing that
+gap — on both AVR silicon and an STM32 target of the same architectural
+family Heim et al. measured — is future work. The full related-work
+positioning is in `docs/LITERATURE_SURVEY.md`.
 
-## Methodology
+## Architecture
 
-Pipeline: ONNX (hand-authored quantized graph, `export/export_model.py`) ->
-IR (`compiler/src/ingest.c`, a hand-rolled protobuf parser) -> per-op
-candidate generation (`compiler/src/codegen/candidates.c`) -> cost-based
-selection (`compiler/src/codegen/select.c`, minimizes `energy_nj`) -> AVR
-assembly (`compiler/src/emit.c`) -> `avr-gcc` assembly -> Avrora Beta
-1.7.115 simulation (`sim/run_avrora.sh`, `-monitors=energy`, ATmega128).
+```
+ONNX classifier --(ingest.c)----\
+                                 >-- typed IR --> lowering / candidates --> selection --> AVR assembly --> avr-gcc --> Avrora
+DSP pipeline ---(dsp_build.c)---/
+```
 
-Every energy figure in this project is either a cited published number or
-an Avrora simulation output -- never a physical measurement (spec section
-3). `cost_table.toml`'s per-cycle constant (2.8375 nJ/cycle) is calibrated
-to Avrora's own built-in ATmega128 power model (3.0V, 7.5667mA active
-current, decompiled from `avrora.jar`'s `avrora.sim.mcu.ATMega128.class`;
-see `SOURCES.md` and spec v2 section 13) rather than the ATmega128
-datasheet's 5V/17mA row an earlier version used -- the first
-end-to-end run showed the datasheet-derived constant overstated Avrora's
-real simulated energy by ~3.75x, even though predicted and real cycle
-counts matched almost exactly. No source available to this project
-supports differentiating energy by instruction *type* within CPU active
-mode (spec v2 section 12) -- every `cost_table.toml` entry reduces to
-`cycles x this constant`.
+The ML path ingests a hand-authored quantized ONNX graph
+(`export/export_model.py`) through a hand-rolled protobuf parser
+(`compiler/src/ingest.c`); the DSP path constructs its fixed graph directly
+(`compiler/src/dsp_build.c`). Both share one typed IR, one lowering
+(`compiler/src/codegen/lower.c`), candidate generation and cost-based
+selection (`candidates.c`, `select.c`, minimizing predicted energy), and
+emission (`emit.c`, `program.c`, and `periodic.c` for the periodic wrapper).
+The emitted assembly is assembled by `avr-gcc` and simulated by Avrora Beta
+1.7.115 (`sim/run_avrora.sh`, `-monitors=energy`, ATmega128). The component
+design is described in `docs/ARCHITECTURE.md`.
 
-Candidate generation and register allocation are
+## Compiler Backend
+
+**Pricing.** Every emitted instruction is priced from `cost_table.toml` as
+`cycles x 2.8375 nJ` (see "Experimental Methodology" for why a single
+constant). Pricing is per executed instruction: straight-line code once, code
+inside a statically bounded counted loop times the product of its enclosing
+trip counts, including the closing branch's one fall-through. The trip counts
+are compile-time constants and no data-dependent branch is emitted, so the
+predicted cycle count is exact; for every retained program it equals
+Avrora's.
+
+**Registers.** Candidate generation and register allocation are
 deliberately scoped, not a fully general "any value in any of AVR's 32
 registers across any op boundary" allocator. AVR's register file is
-committed as follows for this project's per-op arithmetic (see
+committed as follows for the per-op arithmetic (see
 `compiler/include/optifine/codegen/registers.h`):
 
 | registers | role | notes |
@@ -109,21 +116,33 @@ committed as follows for this project's per-op arithmetic (see
 | r22, r23 | sign-extension / ReLU mask scratch | |
 | r24, r25 | general scratch | Const/Input byte loading, Requantize temporaries |
 
-That leaves r9-r15 and r26-r31 (13 registers) genuinely idle at all times,
-plus two more pools available only when their "owning" op isn't running:
-r24/r25 (idle during MatMul) and r3-r8 (idle during MatMul, since
-Requantize and MatMul never execute concurrently in this project's
-straight-line, no-branches programs). `regalloc_next_use`
-(`compiler/src/codegen/regalloc.c`) performs real next-use analysis: it
-marks a value as worth caching when it is a MatMul's activation input,
-which is read once per output channel (a genuine, bounded-distance reuse
-pattern), and leaves every other op's output alone, since every other op
-in this project's graphs consumes its inputs exactly once. Wider,
-general-purpose cross-op register residency was considered and explicitly
-not attempted, because it would require either shrinking the intra-op
-scratch budget above (risking the already golden-value-validated
-arithmetic) or accepting collisions between a cached cross-op value and a
-later op's own scratch use.
+That leaves r9-r15 and r26-r31 (13 registers) idle at all times, plus two
+more pools available only when their "owning" op isn't running: r24/r25
+(idle during MatMul) and r3-r8 (idle during MatMul, since Requantize and
+MatMul never execute concurrently in these straight-line programs).
+
+**Correctness.** Generated programs run in a test-only AVR interpreter
+(`compiler/tests/avr_interp.c`) and are compared exactly with independent
+references: the classifier's output against `export/gen_golden.py`'s numpy
+reference, the DSP pipeline's every intermediate buffer against an integer
+host implementation. The interpreter also counts executed cycles, which the
+tests compare with the compiler's prediction. A lower-energy sequence that
+computes a different answer is a failed test.
+
+## Active-Mode Optimization
+
+The naive baseline lowers each op once and reloads every value from SRAM on
+each use. With `--optimized`, the compiler generates alternative candidates
+and keeps the cheapest. `regalloc_next_use`
+(`compiler/src/codegen/regalloc.c`) performs next-use analysis: it marks a
+value as worth caching when it is a MatMul's activation input, which is read
+once per output channel (a bounded-distance reuse pattern), and leaves every
+other op's output alone, since every other op in these graphs consumes its
+inputs exactly once. MatMul then gets a second candidate that loads its input
+into registers once. Wider cross-op register residency was considered and not
+attempted, because it would require either shrinking the intra-op scratch
+budget above (risking the golden-value-validated arithmetic) or accepting
+collisions between a cached cross-op value and a later op's scratch use.
 
 ### Register cache-pool gap and its closure
 
@@ -132,24 +151,18 @@ r24-r25, r26-r31) for MatMul's cached-input candidate. This covers fc2's
 MatMul (K=8, the contraction dimension of its activation input) fully,
 but fc1's MatMul (K=16) exceeded the pool by exactly one register: byte
 15 of the 16-byte input still fell back to a per-use `lds` (2 cycles)
-instead of the cached `mov` (1 cycle) the other 15 bytes got. This was a
-real, measurable gap, not a rounding error -- fc1's MatMul candidate
-initially priced at 5,101.825 nJ instead of its true achievable minimum.
+instead of the cached `mov` (1 cycle) the other 15 bytes got -- fc1's MatMul
+candidate priced at 5,101.825 nJ instead of its achievable minimum.
 
 The fix: r3-r8 (Requantize's 48-bit product buffer, 6 registers) are also
-idle during any MatMul's own execution, for a different reason than the
-other pools -- they *are* used elsewhere in the same program (by every
-Requantize op), but never concurrently with a MatMul, since this is a
-straight-line program with no interleaving: by the time any Requantize op
-runs, every MatMul that used the cache pool has already finished and
-stored its result to SRAM. Extending `MATMUL_CACHE_POOL_SIZE` from 15 to
-21 (adding r3-r8) let fc1's MatMul cache all 16 input bytes. This was
-re-verified against the golden-value test (bit-exact classifier output
-unchanged) before and after the change -- a correctness-preserving,
-purely energy-improving fix.
-
-Impact of closing this specific gap, on the real Avrora simulation of the
-compiled classifier:
+idle during any MatMul's execution -- they are used elsewhere in the same
+program (by every Requantize op), but never concurrently with a MatMul,
+since this is a straight-line program with no interleaving: by the time any
+Requantize op runs, every MatMul that used the cache pool has finished and
+stored its result to SRAM. Extending `MATMUL_CACHE_POOL_SIZE` from 15 to 21
+(adding r3-r8) let fc1's MatMul cache all 16 input bytes, re-verified
+against the golden-value test (bit-exact classifier output unchanged) before
+and after the change.
 
 | | before (15-register pool) | after (21-register pool) |
 |---|---:|---:|
@@ -157,26 +170,21 @@ compiled classifier:
 | Optimized energy | 17,093.175300 nJ | 17,076.150225 nJ |
 | Delta vs. naive | -106 cycles / -300.776 nJ (-1.73%) | -112 cycles / -317.80 nJ (-1.83%) |
 
-This is offered as a worked example of the broader point: AVR's register
-budget is the binding constraint on how much a next-use allocator can
-achieve here, and small, principled (not ad hoc) increases to that budget
--- justified by an explicit non-overlap argument, not by guesswork --
-directly translate into measurable energy reductions. It also demonstrates
-the project's verification discipline: every register-allocation change
-was re-checked against the same bit-exact golden-value test used to
-validate the naive baseline, not assumed correct because it "should"
-be.
+AVR's register budget is the binding constraint on how much a next-use
+allocator can achieve here, and small increases to that budget -- justified
+by an explicit non-overlap argument -- translate directly into measurable
+energy reductions.
 
-### Periodic power-aware scheduling
+## Periodic Power-Aware Scheduling
 
 Active-mode optimization works *within* Active mode -- every instruction it
 chooses between still costs `cycles x 2.8375 nJ`. Periodic scheduling adds a
-second, independent axis: whether the MCU is put to sleep between
-inferences at all. `compiler/src/codegen/periodic.c` emits two matched
-program variants around the *same* classifier body:
+second, independent axis: whether the MCU sleeps between inferences at all.
+`compiler/src/codegen/periodic.c` emits two matched program variants around
+the *same* compute body:
 
 - **Active (busy-wait) policy**: the MCU polls a tick flag in a tight
-  loop between inferences, never leaving Active mode.
+  8-cycle loop between inferences, never leaving Active mode.
 - **Power-save policy**: `ASSR.AS0` clocks Timer0 asynchronously so it
   keeps ticking while the CPU is asleep; the MCU enters Power-save mode
   (`MCUCR` SM2:0=011) via `cli` -> test tick -> arm `MCUCR` -> `sei` ->
@@ -189,231 +197,40 @@ Both variants share one code path for everything between `; BODY BEGIN`
 and `; BODY END` -- `codegen_emit_inference_body()`, the same function
 the non-periodic program uses -- so a policy can only change *how the
 MCU waits*, never *what it computes*. `test_periodic.c` enforces this
-with a `memcmp` over the two variants' BODY regions, not just an
-assertion in prose. A shared Timer0-overflow ISR (saves/restores r16 and
-SREG, sets an `overrun` flag if a tick arrives while an inference is
-still `running`) drives both policies identically.
+with a `memcmp` over the two variants' BODY regions. A shared
+Timer0-overflow ISR (saves/restores r16 and SREG, sets an `overrun` flag
+if a tick arrives while an inference is still `running`) drives both
+policies identically. The period is `256 x prescaler` cycles for the four
+ATmega128 Timer0 divisors 8, 32, 128 and 1024 (2,048 / 8,192 / 32,768 /
+262,144 cycles).
 
-**Timer0 prescaler sweep.** Four ATmega128 Timer0 CS02:0 divisors (8, 32,
-128, 1024) were swept, each defining a different period between wake
-events (2,048 / 8,192 / 32,768 / 262,144 cycles at the simulated 1 MHz
-clock). Before running any pair through Avrora, `sim/run_phase_b.py`
-statically rejects a divisor if the compiler's own predicted BODY cycle
-count exceeds that period -- divisor 8's period (2,048 cycles) is shorter
-than either variant's predicted body (5,456 naive / 5,344 optimized
-cycles), so it is **excluded from the primary analysis on a static
-deadline check before its numbers are trusted**, not silently folded in.
-Divisor 8 *was* still simulated -- its four raw Avrora runs are retained
-in `sim/fixtures/phase_b/two_by_two.md` as a rejected observation, per
-the project's own rule of keeping rejected rows visible with their reason
-rather than discarding them -- and those runs corroborate the static
-prediction rather than merely repeating it: the count-4 and count-5
-Avrora runs for every divisor-8 variant are byte-identical (same cycle
-count, same energy), which is exactly what happens when the program hits
-`overrun` and halts on its first tick rather than completing a 5th
-inference.
-
-**Differential (steady-state) measurement.** Every reported number is
-`E(inference_count=5) - E(inference_count=4)`, not a single raw run. This
-cancels the one-time initialization cost (stack/Timer0/ISR setup) and
-isolates the true per-inference marginal cost, including the fact that
-the active and Power-save variants have different fixed wrapper lengths
-(confirmed in the raw counts: prescaler-32 count-4 totals 39,011 active
-cycles vs. 40,006 Power-save cycles, a 995-cycle wrapper-length
-difference that the differential method makes non-confounding).
-`sim/tests/test_compare_phase_b.py` locks this in
-(`test_uses_equal_steady_state_increments_despite_995_cycle_offset`).
-
-**Validity gates**, checked before any pair's numbers are reported: equal
-invocation count between the naive/optimized-and-active/Power-save
-quartet, zero overrun, bit-exact classifier output (`[0,-3,18,27]`,
-the classifier's golden value), and identical `body_sha256` across all four
-variants of a divisor. A pair failing any of these is marked `rejected`
-with its reason, never silently dropped (`sim/fixtures/phase_b/primary.md`,
-`two_by_two.md`, `manifest.json`).
-
-## Results: ML Classifier
-
-### Active-mode results
-
-Real Avrora simulation of the compiled `tiny_classifier.onnx` (16->8->4
-INT8 two-layer classifier), naive (single candidate per op, every value
-reloaded from SRAM per use) vs. optimized (candidate diversity for MatMul +
-next-use-informed input caching):
-
-| | naive | optimized | delta |
-|---|---:|---:|---:|
-| Cycles (Avrora, real) | 6,130 | 6,018 | -112 (-1.83%) |
-| Energy (Avrora, real) | 17,393.951625 nJ | 17,076.150225 nJ | -317.80 nJ (-1.83%) |
-| Energy (compiler predicted) | 17,391.038 nJ | 17,073.238 nJ | -317.80 nJ |
-| Golden-value correctness (vs. `export/gen_golden.py`'s independent numpy reference) | bit-exact | bit-exact | both correct |
-
-Predicted and real Avrora numbers agree to within the known +1-cycle fixed
-harness overhead (see `sim/fixtures/bringup_smoke.avrora.txt`) on both
-builds, which is itself a useful internal-consistency check on the cost
-model.
-
-Per-op breakdown shows the improvement is concentrated exactly where the
-mechanism predicts it should be -- the two `OP_MATMUL` ops (the only ops
-whose activation input is reused across a loop rather than touched once):
-
-| op | kind | naive energy (nJ) | optimized candidates | optimized energy (nJ) | saved |
-|---:|---|---:|---:|---:|---:|
-| 3 | MatMul (fc1) | 5,357.200 | 2 | 5,084.800 | 272.400 |
-| 9 | MatMul (fc2) | 1,407.400 | 2 | 1,362.000 | 45.400 |
-| all others | -- | (unchanged) | 1 | (unchanged) | 0 |
-
-### Periodic scheduling results
-
-**Headline finding: periodic power-aware scheduling is what makes the
-active-mode saving observable at all.** Under the Power-save policy, the naive-vs-optimized energy delta
-is **312.606 nJ per inference, exactly, at every accepted prescaler**:
-
-| prescaler | naive Power-save (nJ) | optimized Power-save (nJ) | delta |
-|---:|---:|---:|---:|
-| 32 | 15,814.9276 | 15,502.3217 | 312.6060 |
-| 128 | 16,954.9468 | 16,642.3409 | 312.6060 |
-| 1024 | 27,595.1260 | 27,282.5200 | 312.6060 |
-
-This is not a coincidence -- it is the active-mode optimizer's 112-cycle
-saving (confirmed from the steady-state increments: naive 5,530 active
-cycles/inference vs. optimized 5,418, a 112-cycle difference, matching the
-optimizer's own Avrora-simulated saving in the Results section above) times the
-simulator's active/Power-save per-cycle energy gap. Both per-cycle rates were
-re-derived independently from the raw CSV for this write-up (not merely
-repeated from `cost_table.toml`): active = 23,244.9024 nJ / 8,192 cycles
-= 2.8375125 nJ/cycle (matches the cost table's 2.8375 rounded constant);
-Power-save = 0.0463875 nJ/cycle, solved from the same period's naive
-active/Power-save energy and cycle split. `112 x (2.8375125 -
-0.0463875) = 112 x 2.7911250 = 312.6060 nJ`, matching the table above to
-the fourth decimal place.
-
-**Cross-platform reproduction.** All numbers above were originally
-generated on Windows. The prescaler-32 matched pair (naive vs.
-optimized, both policies, counts 4 and 5 -- the six raw observations
-behind the 312.606 nJ headline number) was independently regenerated
-from source on a second, unrelated machine (Linux) with a *different*
-compiler binary (avr-gcc 16.1.0 vs. the original run's avr-gcc 15.2.0,
-`ckormanyos/real-time-cpp` build) and a *different* JDK 8 vendor/build
-(Temurin 8u504-b01 vs. the original run's Zulu 8.0.492) -- everything
-that could plausibly vary between environments, did. Only `avrora.jar`
-was held identical, and verifiably so: its SHA-256
-(`016021f4...eb`) matches byte-for-byte between the original manifest
-record and the independently downloaded copy used for reproduction, not
-merely "the same version string."
-
-| observation | Windows (original) | Linux (reproduced) |
-|---|---:|---:|
-| optimized/active, count 4 -> 5 (nJ) | 110,376.398738 -> 133,621.301138 | 110,376.398738 -> 133,621.301138 |
-| optimized/Power-save, count 4 -> 5 (nJ) | 64,357.827300 -> 79,860.148950 | 64,357.827300 -> 79,860.148950 |
-| naive/Power-save, count 4 -> 5 (nJ) | 65,613.446700 -> 81,428.374350 | 65,613.446700 -> 81,428.374350 |
-| optimized Power-save marginal (nJ) | 15,502.32165 | 15,502.32165 |
-| naive Power-save marginal (nJ) | 15,814.92765 | 15,814.92765 |
-| **headline delta (nJ)** | **312.6060** | **312.6060** |
-
-Every figure matched to the last recorded decimal place -- not "close
-to," identical. The four regenerated `.S` files' `; BODY BEGIN`/`; BODY
-END` regions were also confirmed byte-identical to the committed
-fixtures (after normalizing line endings, since the original files are
-CRLF and the freshly generated ones are LF -- a text-encoding artifact
-of the two systems, not a content difference; `diff` after `tr -d
-'\r'` shows zero lines changed). This is offered as direct evidence
-against a specific failure mode of simulator-based results: that the
-number could be an artifact of one machine's specific toolchain build
-rather than a property of the emitted program and Avrora's power model.
-It is not the same as hardware validation (see Limitations), but it is
-stronger than a single-machine result.
-
-**Under the active (busy-wait) policy this same 112-cycle saving is
-worth exactly 0 nJ.** `active_nj` in every naive/optimized pair is
-byte-identical at a given prescaler (e.g. both read 23,244.9024 nJ at
-prescaler 32) because busy-wait energy is `period x 2.8375 nJ/cycle`,
-fully determined by the wake period alone -- finishing the classifier
-body 112 cycles sooner under busy-wait just buys 112 more polling
-cycles at the same total energy. **The instruction-selection saving is
-real but invisible without sleep scheduling; periodic scheduling is the
-precondition for the active-mode saving being measurable, not a separate,
-additive percentage.**
-
-**Secondary: duty-cycle-driven scheduling saving**, comparing the
-Power-save policy against an always-Active busy-wait strawman at the
-same wake period (not a compiler-selection result -- a scheduling
-result, reported separately per the distinction above):
-
-| prescaler | period (cycles) | active_nj | powersave_nj | saved_nj | saving % | status |
-|---:|---:|---:|---:|---:|---:|---|
-| 8 | 2,048 | -- | -- | -- | -- | **rejected** (predicted body exceeds period; corroborated by identical count-4/count-5 Avrora runs on all 4 divisor-8 variants) |
-| 32 | 8,192 | 23,244.90 | 15,502.32 (optimized) | 7,742.58 | 33.31% | accepted |
-| 128 | 32,768 | 92,979.61 | 16,642.34 (optimized) | 76,337.27 | 82.10% | accepted |
-| 1024 | 262,144 | 743,836.88 | 27,282.52 (optimized) | 716,554.36 | 96.33% | accepted |
-
-(Full 4x2x2 matrix -- both compute paths, both policies, counts 4 and 5
--- in `sim/fixtures/phase_b/two_by_two.md`; raw Avrora output per run in
-`sim/fixtures/phase_b/*.avrora.txt`; provenance/hashes in
-`sim/fixtures/phase_b/manifest.json`.)
-
-This saving percentage is duty-cycle-parameterized -- it is a property of
-*how long the MCU chooses to sleep between wake events*, and approaches
-100% as the period grows, not a fixed number this project can claim as
-"the" saving. It is reported here as the scheduling-level result it is,
-kept explicitly separate from the 312.606 nJ compiler-attributable result
-above.
-
-#### Relation to the TinyML "latency is a perfect proxy for energy" claim
-
-Heim, Biri, Qu, and Thiele (arXiv:2104.10645, 2021) measured inference
-energy on ARM Cortex-M boards and found near-perfect latency/energy
-correlation (r = 0.9946 whole-network, r = 0.9995 per-layer), concluding
-that "the inference latency is a perfect proxy for the energy
-consumption of the investigated MCUs" and that latency-optimization
-results "also apply to energy consumption." That claim holds *within
-Active mode*, and this project's active-mode results agree with it: its
-energy model there reduces to `cycles x 2.8375 nJ`, so the ~1.83%
-energy saving is mathematically identical to a cycle-count saving --
-exactly what Heim et al.'s regime predicts, and this project does not
-contest that.
-
-Periodic scheduling is where the claim breaks, and the 312.606 nJ / 0 nJ contrast
-above is the direct evidence: two variants (naive vs. optimized under
-busy-wait) share the *same* absolute latency between wake events (both
-still take the full 8,192-cycle period to reach the next tick) yet
-differ in energy by 0 nJ, while the same two variants under Power-save
-differ in energy by 312.606 nJ despite an even smaller latency
-difference once idle time is excluded. Once a sleep state exists below
-Active, cycles stop being a proxy for energy, because a Power-save cycle
-and an Active cycle cost 2.7911 nJ apart (a ~61.2x ratio, decompiled from
-Avrora's own `ATMega128.class`/`Energy.class`, see `SOURCES.md`) --
-elapsed latency alone cannot distinguish which kind of cycle was spent.
-This is a scope objection, not a numbers dispute: Heim et al.'s Cortex-M
-benchmark never left Active mode, so their model has no term for a
-below-Active state; ATmega128, like nearly all MCUs, exposes one. The
-full comparison, including why this is a fair, non-strawman contention
-and how it relates to prior compiler-directed sleep-scheduling and
-instruction-level-energy work, is in `documents/LITERATURE_SURVEY.md`
-section 1.
+For the DSP pipeline the wrapper copies the output tensor at its real size
+(16 bytes, `FIXED_Q15[8]`, where the classifier's is 4) and emits the
+twiddle table after its interrupt handler, where control cannot reach it.
+`test_dsp_pipeline` checks that the periodic build's initialization, body
+and table are the ordinary `--dsp` program's, instruction for instruction,
+that its wrapper writes no register but r16 (saved by the interrupt
+handler), and that in the interpreter the body run five times after one
+initialization reproduces every buffer and all 16 output bytes each time.
 
 ## DSP Workload
 
 The second workload is a fixed audio-style pipeline built directly as IR
 (`compiler/src/dsp_build.c`) rather than ingested: 64 Q15 samples, a Hamming
-window, a 64-point FFT, per-bin magnitude and peak selection.
-`optifine --dsp` compiles it (README, "Compile the DSP pipeline"). The
-figures in this section are derived from the retained raw run in
-`sim/fixtures/dsp/` by `sim/report_results.py` (generated table:
-`sim/fixtures/dsp/results.md`; verify with `python3 sim/run_dsp.py check`).
+window, a 64-point FFT, per-bin magnitude and peak selection, compiled by
+`optifine --dsp`.
 
 ### Why the DSP lowering uses loops
 
-The original design lowered every op fully unrolled, as the ML
-path does. A pre-flight flash model -- checked against real `avr-size`
-output for the Window op (4,608 B predicted, 4,608 B linked) -- projected the
-unrolled pipeline at about 497 KB, roughly 379% of the ATmega128's 128 KiB
-flash. That was a code-representation problem, not a workload problem, so the
-workload was kept and the representation changed: each repeated structure is
-emitted once inside a statically bounded counted loop. The trip counts are
-compile-time constants, so pricing stays exact: the cost model records each
-loop's region and trip count and charges every instruction by how often it
-executes, including the one-time fall-through of the closing branch.
+Lowering every op fully unrolled, as the ML path does, was checked first. A
+flash model -- checked against real `avr-size` output for the Window op
+(4,608 B predicted, 4,608 B linked) -- projected the unrolled pipeline at
+about 497 KB, roughly 379% of the ATmega128's 128 KiB flash. That was a
+code-representation problem, not a workload problem, so the workload was
+kept and the representation changed: each repeated structure is emitted once
+inside a statically bounded counted loop, priced exactly as described under
+"Compiler Backend". The 497 KB figure is that projection, not a measurement
+of anything built.
 
 Supporting backend work, each validated against Avrora before use:
 
@@ -428,11 +245,6 @@ Supporting backend work, each validated against Avrora before use:
   reads, which a test checks over every op's code;
 - one label namespace per emitted assembly file, so several looping ops
   can share a program.
-
-The result is the whole pipeline in 12,800 B of flash with exact semantics
-and zero cycle-prediction error, against a projection that could not fit.
-The 497 KB figure is the pre-redesign projection that motivated this change,
-not a measurement of anything that was built.
 
 ### Pipeline and semantics
 
@@ -480,10 +292,163 @@ write outside the graph tensors and scratch arena (`test_dsp_pipeline`). The
 interpreted instruction stream is checked to be exactly the one
 `optifine --dsp` writes.
 
-### DSP results
+## Experimental Methodology
+
+**Simulator and energy model.** Every energy figure in this project is
+either a cited published number or an Avrora simulation output -- never a
+physical measurement. Programs run in Avrora Beta 1.7.115's ATmega128 model
+at 8 MHz with the energy monitor. `cost_table.toml`'s per-cycle constant
+(2.8375 nJ/cycle) is calibrated to Avrora's own built-in ATmega128 power
+model (3.0 V, 7.5667 mA active current, decompiled from `avrora.jar`'s
+`avrora.sim.mcu.ATMega128.class`; see `SOURCES.md`) rather than the
+ATmega128 datasheet's 5 V/17 mA row an earlier version used -- the first
+end-to-end run showed the datasheet-derived constant overstated Avrora's
+simulated energy by ~3.75x, even though predicted and simulated cycle counts
+matched almost exactly. No source available to this project supports
+differentiating energy by instruction *type* within CPU active mode, and
+Avrora itself simulates equal-cycle sequences to bit-identical energy, so
+every `cost_table.toml` entry reduces to `cycles x this constant`. Avrora's
+Power-save cost, 0.0463875 nJ/cycle, is solved from its own reports (below).
+
+**Harness calibration.** The hand-written `sim/smoke.s` (7 one-cycle
+instructions and a `break`) reports 8 cycles and 22.7001 nJ: the final
+`break` adds one fixed cycle to every simulated program.
+
+**Steady-state measurement.** Every periodic figure is
+`E(inference_count=5) - E(inference_count=4)`, not a single raw run. This
+cancels the one-time initialization cost (stack/Timer0/ISR setup) and
+isolates the per-period marginal cost, including the fact that the busy-wait
+and Power-save variants have different fixed wrapper lengths (in the raw
+counts, prescaler-32 count-4 totals 39,011 busy-wait cycles against 40,006
+for Power-save, a 995-cycle wrapper-length difference the differential
+method makes non-confounding; `sim/tests/test_compare_periodic.py` locks this
+in).
+
+**Validity gates**, checked before any pair's numbers are reported: the
+count-4 and count-5 programs of a variant differ only in the count literal;
+the busy-wait/Power-save quartet shares one `body_sha256`, one set of input
+hashes and one toolchain; the declared output is the golden value
+(`[0,-3,18,27]` for the classifier); and the steady-state increments agree.
+A pair failing any gate is marked `rejected` with its reason, never dropped.
+
+**Static deadline check.** Before comparing energy, a prescaler is rejected
+when the compiler's predicted body cycles are not below its period. For the
+classifier this rejects prescaler 8 (2,048-cycle period against a
+5,456 naive / 5,344 optimized cycle body); for the DSP pipeline it rejects
+prescalers 8, 32 and 128 (147,565-cycle body). Rejected prescalers are still
+simulated and kept visible in the tables. Their Avrora runs corroborate the
+prediction: count-4 and count-5 runs are identical, as happens when the
+program hits `overrun` and halts on its first tick.
+
+**DSP busy-wait tolerance.** One comparison rule differs for the DSP sweep
+only. The busy-wait loop polls the tick flag in an 8-cycle loop, so each wake
+is detected up to 8 cycles late, and with the DSP body's length that
+detection phase does not settle: Avrora's busy-wait increments are 262,141
+and 262,149 cycles around the exact 262,144 of every Power-save increment
+(the classifier's body happens to hit a fixed point, where the increments
+match exactly, as the ML comparator requires). The DSP sweep accepts a pair
+whose Power-save increment equals the Timer0 period exactly and whose
+busy-wait increment is within the loop's 8 cycles of it, after checking that
+the emitted loop is exactly that 8-cycle loop and the busy-wait runs are all
+Active cycles, and scales the busy-wait energy to the exact period: a factor
+of 262,144 / 262,141 = 1.0000114, from a raw busy-wait increment of
+743,828.36 nJ to 743,836.88 nJ. The raw increments and the factor are
+recorded in the manifest.
+
+**Evidence limit.** Output, completion count and overrun are compiler/run
+declarations; no simulated SRAM is read back from Avrora. That the periodic
+programs compute correctly is established in the test interpreter.
+
+## Evaluation
+
+### Active-mode optimization: ML classifier
+
+Avrora simulation of the compiled `tiny_classifier.onnx` (16->8->4 INT8
+two-layer classifier), naive (single candidate per op, every value reloaded
+from SRAM per use) vs. optimized (candidate diversity for MatMul + next-use
+input caching):
+
+| | naive | optimized | delta |
+|---|---:|---:|---:|
+| Cycles (Avrora) | 6,130 | 6,018 | -112 (-1.83%) |
+| Energy (Avrora) | 17,393.951625 nJ | 17,076.150225 nJ | -317.80 nJ (-1.83%) |
+| Energy (compiler predicted) | 17,391.038 nJ | 17,073.238 nJ | -317.80 nJ |
+| Golden-value correctness | bit-exact | bit-exact | both correct |
+
+Predicted and simulated numbers agree to within the fixed +1-cycle `break`
+on both builds. The implied Active cost is 2.8375125 nJ/cycle whether derived
+from the naive run, the optimized run, or their difference: under Avrora's
+Active model, energy selection reduces exactly to cycle selection.
+
+The improvement is concentrated where the mechanism predicts -- the two
+MatMul ops, the only ops whose activation input is reused across a loop:
+
+| op | kind | naive energy (nJ) | optimized candidates | optimized energy (nJ) | saved |
+|---:|---|---:|---:|---:|---:|
+| 3 | MatMul (fc1) | 5,357.200 | 2 | 5,084.800 | 272.400 |
+| 9 | MatMul (fc2) | 1,407.400 | 2 | 1,362.000 | 45.400 |
+| all others | -- | (unchanged) | 1 | (unchanged) | 0 |
+
+### Periodic scheduling: ML classifier
+
+**Periodic scheduling is what makes the active-mode saving observable.**
+Under the Power-save policy, the naive-vs-optimized energy delta is
+**312.606 nJ per period, exactly, at every accepted prescaler**:
+
+| prescaler | naive Power-save (nJ) | optimized Power-save (nJ) | delta |
+|---:|---:|---:|---:|
+| 32 | 15,814.9276 | 15,502.3217 | 312.6060 |
+| 128 | 16,954.9468 | 16,642.3409 | 312.6060 |
+| 1024 | 27,595.1260 | 27,282.5200 | 312.6060 |
+
+This is the active-mode optimizer's 112-cycle saving (in the steady-state
+increments: naive 5,530 Active cycles per period vs. optimized 5,418) times
+the simulator's Active/Power-save per-cycle energy gap. Both per-cycle rates
+are re-derived from the raw reports: Active = 23,244.9024 nJ / 8,192 cycles
+= 2.8375125 nJ/cycle; Power-save = 0.0463875 nJ/cycle, solved from the same
+period's Active/Power-save energy and cycle split.
+`112 x (2.8375125 - 0.0463875) = 112 x 2.7911250 = 312.6060 nJ`.
+
+**Under busy-wait the same 112-cycle saving is worth exactly 0 nJ.** The
+busy-wait energy of the naive and optimized builds is identical at a given
+prescaler (23,244.9024 nJ at prescaler 32) because it is
+`period x 2.8375 nJ/cycle`, fixed by the period alone -- finishing the body
+112 cycles sooner only buys 112 more polling cycles. The instruction-level
+saving is real but invisible without sleep scheduling.
+
+**Scheduling saving**, comparing Power-save against a busy-wait baseline at
+the same period (a scheduling result, not a compiler-selection result):
+
+| prescaler | period (cycles) | busy-wait (nJ) | Power-save (nJ) | saved (nJ) | saving | status |
+|---:|---:|---:|---:|---:|---:|---|
+| 8 | 2,048 | -- | -- | -- | -- | rejected: body exceeds period |
+| 32 | 8,192 | 23,244.90 | 15,502.32 | 7,742.58 | 33.31% | accepted |
+| 128 | 32,768 | 92,979.61 | 16,642.34 | 76,337.27 | 82.10% | accepted |
+| 1024 | 262,144 | 743,836.88 | 27,282.52 | 716,554.36 | 96.33% | accepted |
+
+(Power-save figures are for the optimized build. The full 4x2x2 matrix of
+runs is in `sim/fixtures/periodic_ml/two_by_two.md`.) The saving depends on
+the duty cycle -- how long the MCU sleeps between wake events -- and
+approaches 100% as the period grows; it is not a fixed compiler saving, and
+it is kept separate from the 312.606 nJ compiler-attributable result above.
+
+**Relation to "latency is a perfect proxy for energy".** Heim et al.'s claim
+holds within Active mode, and the active-mode results agree with it: the
+energy model there is `cycles x 2.8375 nJ`, so the 1.83% energy saving is
+identical to a cycle saving. The 312.606 nJ / 0 nJ contrast is where it
+breaks: under busy-wait the naive and optimized builds take the same time to
+the next tick and cost the same energy, while under Power-save they differ by
+312.606 nJ. Once a sleep state exists below Active, a Power-save cycle and an
+Active cycle cost 2.7911 nJ apart (a ~61.2x ratio, from Avrora's
+`ATMega128.class`/`Energy.class`, see `SOURCES.md`), and elapsed latency
+alone cannot tell which kind of cycle was spent. This is a scope objection,
+not a numbers dispute: their Cortex-M benchmark never left Active mode. The
+full comparison is in `docs/LITERATURE_SURVEY.md`, section 1.
+
+### DSP workload
 
 Avrora simulation of the `optifine --dsp` program on the default demo input
-(ATmega128, 8 MHz):
+(`models/dsp_demo_input.txt`, ATmega128, 8 MHz):
 
 | metric | DSP pipeline |
 |---|---:|
@@ -498,10 +463,9 @@ Avrora simulation of the `optifine --dsp` program on the default demo input
 Time is the cycle count divided by the 8 MHz clock, not a wall-clock
 measurement. The energy is Avrora's own report, 2.8375125 nJ per Active cycle
 exactly as for the ML path. The compiler's printed estimate, 420,900.56 nJ,
-prices the same cycles at `cost_table.toml`'s rounded 2.8375 nJ/cycle; the
-table is pinned by the periodic-scheduling manifest and was not changed. The cycle count
-does not depend on the input samples: every data decision is a mask, and
-only loop control branches.
+prices the same cycles at `cost_table.toml`'s rounded 2.8375 nJ/cycle. The
+cycle count does not depend on the input samples: every data decision is a
+mask, and only loop control branches.
 
 Where the cycles and the flash go (compiler prediction per op, which sums
 to the Avrora total):
@@ -520,19 +484,19 @@ to the Avrora total):
 
 The setup row is part of the program, not a harness: like the ML build's
 demo input, the samples and coefficients are embedded at compile time.
-(Isolated FFT fixtures elsewhere in the test suite report 73,513 cycles
-because they include their own `break`; inside the complete program the
-FFT's six stages cost 73,512.) FFT and Magnitude are 84% of the cycles;
-Window, still fully unrolled, is 36% of the flash.
+(Isolated FFT tests report 73,513 cycles because they include their own
+`break`; inside the complete program the six stages cost 73,512.) FFT and
+Magnitude are 84% of the cycles; Window, still fully unrolled, is 36% of the
+flash.
 
 SRAM is 2,336 B of graph tensors (one buffer per op, none reused) plus a
 181-byte scratch arena. The arena is an overlay across op lifetimes, so the
 most any op holds at once is 64 B (PeakExtract's `selected[]`); per-op
-scratch is not additive. The program uses no stack (the periodic build of
-the next section uses 4 B, for its timer interrupt).
+scratch is not additive. The program uses no stack (its periodic build uses
+4 B, for the timer interrupt).
 
-The two workloads side by side (they compute different things, so this
-shows the backend's breadth rather than comparing the algorithms' efficiency):
+The two workloads side by side (they compute different things, so this shows
+the backend's breadth rather than comparing the algorithms' efficiency):
 
 | | ML classifier (optimized) | DSP pipeline |
 |---|---:|---:|
@@ -541,36 +505,18 @@ shows the backend's breadth rather than comparing the algorithms' efficiency):
 | Simulated active energy | 17,076.15 nJ | 420,902.42 nJ |
 | Linked flash | 11,524 B | 12,800 B |
 
-(ML flash is `avr-size` of the current `--optimized` build.)
+(ML flash is `avr-size` of the `--optimized` build.)
 
 The DSP path has one lowering per op, so there is no naive-versus-optimized
 pair as on the ML path: under a single per-cycle energy constant the two
-would select the same code (the active-mode finding), so the effort went
-into periodic scheduling instead.
+would select the same code (the active-mode finding).
 
-### DSP periodic scheduling results
+### Periodic scheduling: DSP pipeline
 
-A second, structurally independent energy-delta data point: the DSP program
-as the periodic wake body, in the unchanged periodic-scheduling
-wrapper (`optifine --dsp --periodic-count N --wait-policy
-active|powersave --timer-prescaler P`), swept over the same four Timer0
-prescalers, both wait policies and counts 4 and 5 -- 16 Avrora runs,
-retained in `sim/fixtures/phase_b_dsp/` and revalidated without running any
-tool by `python3 sim/run_phase_b_dsp.py`. Input: `models/dsp_demo_input.txt`.
+The DSP program as the periodic wake body (`optifine --dsp --periodic-count N
+--wait-policy active|powersave --timer-prescaler P`), swept over the same four
+prescalers, both wait policies and counts 4 and 5 -- 16 Avrora runs.
 Figures are steady-state `E(5) - E(4)` increments, as for the ML sweep.
-
-Carrying the DSP program needed one wrapper change: the terminal output
-copy handled only the ML classifier's 4-byte INT8 output, and now uses the
-output tensor's real size (16 bytes, `FIXED_Q15[8]`). The wrapper also emits
-the twiddle table after its interrupt handler, where control cannot reach it.
-Every ML program, periodic or not, that the compiler emits is
-byte-identical to before this change. `test_dsp_pipeline` checks that the periodic build's
-initialization, body and table are the ordinary `--dsp` program's,
-instruction for instruction, and that its wrapper writes no register but
-r16 (saved by the interrupt handler); in the interpreter, the body run five
-times after one initialization reproduces every buffer and all 16 output
-bytes each time. As in the ML experiment, no simulated SRAM is read back
-from Avrora.
 
 | prescaler | period (cycles) | DSP compute (cycles) | idle window | busy-wait (nJ/period) | Power-save (nJ/period) | saved | saving |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -579,39 +525,23 @@ from Avrora.
 | 128 | 32,768 | 147,565 | none | -- | -- | -- | compute-bound |
 | 1024 | 262,144 | 147,565 | 114,579 | 743,836.88 | 424,239.11 | 319,597.77 nJ | 42.97% |
 
-(Generated by `sim/report_results.py`; the per-run tables are
-`sim/fixtures/phase_b_dsp/primary.md` and `two_by_two.md`.)
-
 Only prescaler 1024 has a period long enough for the DSP body; at the three
-shorter periods the body overruns the timer, which the static deadline check
-the ML sweep applies to its prescaler 8 rejects here as well. That is a
-property of the workload against these periods: there is no idle time to
-sleep through, and the wrapper's overrun flag ends each such run after one
-body, as it ends the ML sweep's prescaler-8 runs.
+shorter periods the body overruns the timer, there is no idle time to sleep
+through, and the wrapper's overrun flag ends each run after one body.
 
-At prescaler 1024 each Power-save period is 147,639 Active cycles (the
-body and the wrapper) and 114,505 Power-save cycles; busy-waiting spends
-all 262,144 in Active mode. The saving is the idle part of the period moved
-from 2.8375 to 0.0464 nJ per cycle, so it tracks the duty cycle, not the
-DSP code: the ML classifier, whose body fills about 2% of the same period,
-saves 96.33% there. The two points are separate results and are not
-averaged.
+At prescaler 1024 each Power-save period is 147,639 Active cycles (the body
+and the wrapper) and 114,505 Power-save cycles; busy-waiting spends all
+262,144 in Active mode. The saving is the idle part of the period moved from
+2.8375 to 0.0464 nJ per cycle, so it tracks the duty cycle, not the DSP code:
+the classifier, whose body fills about 2% of the same period, saves 96.33%
+there. The two points are separate results and are not averaged.
 
-One comparison rule differs from the ML sweep, and only for this sweep.
-The busy-wait loop polls the tick flag in an 8-cycle loop, so each wake is
-detected up to 8 cycles late, and with the DSP body's length that
-detection phase does not settle: Avrora's busy-wait increments were
-262,141 and 262,149 cycles around the exact 262,144 of every Power-save
-increment (the ML body happens to hit a fixed point, where the increments
-match exactly, as the ML comparator requires). The DSP sweep accepts a pair
-whose Power-save increment equals the Timer0 period exactly and whose
-busy-wait increment is within the loop's 8 cycles of it, and scales the
-busy-wait energy (all Active cycles at constant power) to the exact period:
-a factor of 262,144 / 262,141 = 1.0000114 here, from a raw Avrora busy-wait
-increment of 743,828.36 nJ to the normalized 743,836.88 nJ in the table. The scaled figure, 743,836.8768 nJ, is
-identical to the ML sweep's directly simulated busy-wait energy at the same
-prescaler, as it must be: busy-waiting spends the whole period in Active
-mode whatever the workload.
+The busy-wait figure is the normalized one described under "Experimental
+Methodology" (raw 743,828.36 nJ over a 262,141-cycle increment; normalized
+743,836.88 nJ over the exact period). The normalized figure, 743,836.8768 nJ,
+equals the ML sweep's directly simulated busy-wait energy at the same
+prescaler, as it must: busy-waiting spends the whole period in Active mode
+whatever the workload.
 
 The periodic DSP program links at 13,172 B of `.text` (the ordinary one:
 12,800 B). Static SRAM is 2,521 B -- the 2,517 B of DSP tensors and scratch
@@ -619,110 +549,108 @@ plus the wrapper's 4 scheduler bytes -- and the timer interrupt, the only
 stack user, needs at most 4 B (two pushes and the return address; it does
 not nest, and nothing calls).
 
-## Limitations
+### Toolchain independence
 
-- **Demo input is fixed and compile-time-baked**, not live sensor data
-  (`models/tiny_classifier_golden_input.txt`). A real deployment would
-  read this from ADC/UART/host at runtime. This is a deliberate scope cut,
-  stated here rather than glossed over.
-- **No runtime saturation on Requantize overflow.** This project verifies
-  the actual fixed demo input's forward pass at compile time
-  (`lower_verify_demo_forward_pass`) and refuses to compile rather than
-  saturate -- a static worst-case-over-all-inputs bound is mathematically
-  infeasible for MinMax-calibrated per-tensor quantization on
-  unbounded-support inputs (confirmed empirically, not just in theory).
-  A real deployment accepting arbitrary runtime inputs would need actual
-  runtime saturation, not implemented here.
-- **Requantize's fixed-point multiplier is 16-bit, not 32-bit** (Q15-style,
-  derived via `frexp`). Chosen because the int32 accumulator only ever
-  uses ~19 bits of real magnitude for these layer shapes, so a 16-bit
-  multiplier's precision already exceeds what the int8 output can
-  represent -- not a shortcut, a match to the actual precision ceiling.
-- **Register allocation is scoped to MatMul's activation
-  input**, not a fully general cross-op allocator (see Methodology). This
-  is a real, honest limit of AVR's register budget given this project's
-  already-committed intra-op scratch usage, not an oversight.
-- **Weight constants load via synthesized `ldi`+`sts`**, not
-  `.rodata`/flash-resident + `lpm`. `sim/run_avrora.sh` builds with
-  `avr-gcc -nostartfiles`, so there is no crt0 to copy an initialized
-  `.data` section into SRAM; flash-resident constants would need
-  `lpm`/Z-register addressing and a new cost-table category, deferred.
-- **Single demo model, single input vector.** No claim is made about
-  behavior across model architectures, layer counts, or a broader input
-  distribution -- see spec section 9's non-goals (no physical hardware,
-  no claim of beating a production ML compiler, no multi-ISA support,
-  limited operator coverage).
-- **The cost-category-to-cost_table.toml mapping for the opcodes beyond the
-  original 7** (`muls`, `mulsu`, `adc`, `sbc`, `lsl`,
-  `clr`, `com`, `and`, `asr`, `ror`) borrows same-cycle-count categories
-  rather than having their own cited AVR Instruction Set Manual section
-  numbers -- numerically inert (see `SOURCES.md`) but a traceability gap
-  for a fully rigorous write-up, left to a future sourcing pass.
-- **Periodic scheduling has no physical-hardware correlation.** All Power-save/Timer0
-  behavior is Avrora's simulated model; Avrora has no Watchdog Timer
-  implementation at all (confirmed via `jar tf avrora.jar | grep -i
-  watchdog` returning zero matches, and empirically by a Power-down +
-  watchdog spike hanging indefinitely -- see `documents/PHASE_B_NOTES.md`),
-  so this project cannot claim Power-down mode is simulatable here, only
-  Idle and Power-save, and only Power-save is used for the reported
-  numbers.
-- **The deadline/overrun check is compiler-side static prediction plus
-  Avrora's own reported cycle/state counts, not an in-simulation SRAM
-  readback of the program's own `completed`/`overrun` bytes.** Divisor
-  8's rejection is corroborated by external evidence (identical count-4
-  and count-5 runs, consistent with an early halt) rather than by reading
-  the emitted `overrun` flag back out of simulated memory; no claim is
-  made beyond what `manifest.json`'s `evidence_limit` field states.
-- **Single MCU, single model, single input, four prescalers.** No claim
-  is made about behavior across other AVR chips, sleep-mode
-  combinations, model architectures, or workloads with irregular
-  (non-periodic) trigger patterns -- the scheduling saving formula
-  (`saving ~= 0.984 x idle_fraction`, `documents/LITERATURE_SURVEY.md`
-  section 1.3) is specific to this project's calibrated
-  active/Power-save current ratio.
-- **The DSP figures are simulated, like everything else here.** The
-  generated program executes correctly and its cycle count is predicted
-  exactly, but only in Avrora and the test interpreter; no ATmega128 board
-  has run it.
-- **One DSP input is simulated in Avrora.** The 18-input correctness sweep
-  runs in the test interpreter; Avrora reproduces the cycle count, which
-  does not depend on the samples, for the demo input.
-- **The DSP periodic-scheduling result is one accepted point.** Only prescaler 1024 is
-  long enough for the DSP body, and its busy-wait figure is scaled by
-  1.0000114 to the exact period because busy-wait wake detection jitters
-  within an 8-cycle poll loop (see "DSP periodic scheduling results").
-- **No DSP candidate diversity:** each op has one lowering.
-- **PeakExtract reports magnitudes, not bin positions.** Reporting positions
-  would need a wider or second output tensor, an IR change not made here.
-- **Extending the retained ML scheduling experiment requires its recorded
-  toolchain.** `python3 sim/run_phase_b.py reproduce-retained` revalidates
-  the retained evidence on any machine and only *reports* whether the local
-  toolchain matches the recorded one; `supplemental`, which adds runs to that
-  experiment, refuses unless the recorded compiler, assembler and simulator
-  binaries are present. A fresh experiment (`run-new`) records whatever
-  toolchain it used. The numbers themselves replicate across platforms (see
-  "Cross-platform reproduction" above).
+The published evidence was captured on Linux with avr-gcc 16.1.0 and
+Temurin JDK 8u504-b01. The project's original experiments ran on Windows
+with avr-gcc 15.2.0 and Zulu JDK 8u492; only `avrora.jar` was the same file
+(SHA-256 `016021f4...eb`). Every cycle count and every energy figure of
+every run -- the two active-mode builds, the DSP program, all 32 ML periodic
+runs and all 16 DSP periodic runs -- is identical between the two, to the
+last digit Avrora prints. The results are properties of the emitted programs
+and Avrora's power model, not of one machine's toolchain; they are still not
+hardware measurements (see Limitations).
 
 ## Reproducibility
 
-Raw simulator output is retained under `sim/fixtures/` -- the active-mode ML
-runs, the ML periodic-scheduling sweep (`phase_b/`), the complete DSP program
-(`dsp/`) and the DSP periodic-scheduling sweep (`phase_b_dsp/`) -- each
-experiment with a manifest pinning its inputs, artifacts and tools by
-SHA-256. `python3 sim/report_results.py` regenerates every table in this
-report from those files; `python3 sim/run_dsp.py check`,
-`python3 sim/run_phase_b.py reproduce-retained` and
-`python3 sim/run_phase_b_dsp.py` revalidate the retained experiments without
-running any tool, and their `capture`/`run-new` modes repeat them with a
-local toolchain into a fresh directory. The README lists the commands.
+Raw simulator output is retained under `sim/fixtures/`: the active-mode ML
+runs and calibration program (`active_ml/`), the complete DSP program
+(`dsp/`), and the two periodic-scheduling sweeps (`periodic_ml/`,
+`periodic_dsp/`). Each experiment has a manifest recording its source
+commit, exact commands with repository-relative paths, tool versions and the
+SHA-256 of every recorded input and raw artifact. `python3
+sim/report_results.py` regenerates every table in this report from those
+files. `sim/run_active_ml.py check`, `sim/run_dsp.py check`,
+`sim/run_periodic_ml.py reproduce-retained` and
+`sim/run_periodic_dsp.py reproduce-retained` revalidate the retained
+experiments without running any tool; their `capture`/`run-new` modes repeat
+them with a local toolchain into a fresh directory. `docs/REPRODUCIBILITY.md`
+lists the commands and tool versions.
+
+## Limitations
+
+- **Simulation only.** All energy figures come from Avrora's ATmega128 power
+  model; no ATmega128 board has run the generated programs.
+- **Uniform Active-mode cost model.** Energy is cycles times one constant,
+  because no available source supports per-instruction-type pricing.
+- **Demo inputs are fixed and compile-time-baked**
+  (`models/tiny_classifier_golden_input.txt`, `models/dsp_demo_input.txt`),
+  not live sensor data. A deployment would read them at runtime.
+- **No runtime saturation on Requantize overflow.** The compiler verifies the
+  fixed demo input's forward pass at compile time
+  (`lower_verify_demo_forward_pass`) and refuses to compile rather than
+  saturate -- a static worst-case bound over all inputs is infeasible for
+  MinMax-calibrated per-tensor quantization on unbounded-support inputs. A
+  deployment accepting arbitrary inputs would need runtime saturation.
+- **Requantize's fixed-point multiplier is 16-bit** (Q15-style, derived via
+  `frexp`). The int32 accumulator only uses ~19 bits of magnitude for these
+  layer shapes, so a 16-bit multiplier's precision already exceeds what the
+  int8 output can represent.
+- **Register allocation is scoped to MatMul's activation input**, not a
+  general cross-op allocator (see "Active-Mode Optimization").
+- **Weight constants load via synthesized `ldi`+`sts`**, not flash-resident
+  `.rodata` + `lpm`: programs are assembled with `-nostartfiles`, so there is
+  no crt0 to copy an initialized `.data` section into SRAM.
+- **Narrow scope.** One classifier, one fixed DSP pipeline, one MCU, four
+  prescalers. No claim is made across model architectures, other AVR chips,
+  other sleep modes, broader input distributions, general ONNX operator
+  coverage, multiple ISAs, or irregular (non-periodic) trigger patterns; the
+  scheduling-saving relation (`saving ~= 0.984 x idle_fraction`,
+  `docs/LITERATURE_SURVEY.md` section 1.3) is specific to this calibrated
+  Active/Power-save ratio.
+- **Cost-category traceability.** The opcodes beyond the original seven
+  (`muls`, `mulsu`, `adc`, `sbc`, `lsl`, `clr`, `com`, `and`, `asr`, `ror`,
+  and the DSP loop machinery) borrow same-cycle-count categories rather than
+  having their own cited instruction-manual rows -- numerically inert (see
+  `SOURCES.md`) but a traceability gap.
+- **Only Idle and Power-save are simulatable.** Avrora has no Watchdog Timer
+  implementation (`jar tf avrora.jar | grep -i watchdog` finds nothing, and a
+  Power-down + watchdog program never wakes), so Power-down cannot be
+  evaluated here; only Power-save is used.
+- **No simulated SRAM readback.** The deadline/overrun evidence is the
+  compiler's static prediction plus Avrora's cycle and state counts, not a
+  read of the program's own `completed`/`overrun` bytes; manifests state this
+  in their `evidence_limit` field.
+- **One DSP input is simulated in Avrora.** The 18-input correctness sweep
+  runs in the test interpreter; Avrora reproduces the cycle count, which does
+  not depend on the samples, for the demo input.
+- **One accepted DSP periodic point,** at prescaler 1024, with the busy-wait
+  normalization described above.
+- **No DSP candidate diversity:** each DSP op has one lowering.
+- **PeakExtract reports magnitudes, not bin positions.** Positions would need
+  a wider or second output tensor.
 
 ## Future Work
 
-- Measure the generated programs on physical ATmega128 hardware, and an
+- Measure the generated programs on physical ATmega128 hardware, and on an
   STM32 target of the family Heim et al. measured.
-- Per-instruction-type energy costs, if a source or measurement supports them.
+- Per-instruction-type energy costs, if a source or measurement supports
+  them.
 - Runtime input from a sensor or host instead of compile-time inputs.
 - DSP optimizations the current baseline leaves open: FFT and Magnitude are
   84% of its cycles, and the fully unrolled Window is 36% of its flash.
 - Broader workloads: more ONNX operators, other FFT lengths, peak positions
-  as output.
+  as output, and a general cross-op register allocator.
+
+## Conclusion
+
+OptiFine compiles two structurally different workloads for the ATmega128
+with an exact cycle model: every retained program's predicted cycle count
+equals Avrora's. Within Active mode, energy-aware code selection is cycle
+minimization -- the classifier's 1.83% saving is exactly its 112 cycles.
+Once the compiler also schedules sleep, energy and latency separate: idle
+time costs 61 times less, the saving follows the duty cycle (96.33% for the
+classifier, 42.97% for the DSP pipeline at the same period), and the
+active-mode saving becomes visible (312.606 nJ per period) only because the
+processor sleeps through the cycles it frees. These are simulated results;
+the next step is to measure them on hardware.

@@ -1,9 +1,8 @@
 """PyTorch -> ONNX export for the demo model, producing the INT8-quantized
 graph ingest.c parses (OpKind set: Input, Const, MatMul, Add, Relu,
-Requantize, Output -- see spec v2 section 6.1).
+Requantize, Output).
 
-torch.onnx.export produces the actual float graph (existing tooling, per
-spec section 4) -- but PyTorch's own quantization + ONNX export pipeline
+torch.onnx.export produces the actual float graph (existing tooling) -- but PyTorch's own quantization + ONNX export pipeline
 wraps every quantized op in exporter-internal noise (Cast/ConstantOfShape/
 Identity boilerplate) and fuses Linear layers into Gemm rather than
 separate MatMul/Add. Neither is fixable via qconfig; it's the legacy

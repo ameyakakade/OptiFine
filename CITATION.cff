@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "OptiFine: Energy-Aware Code Generation for AVR"
+abstract: >-
+  A research compiler backend that generates energy-aware AVR code for the
+  ATmega128. It compiles an INT8 neural-network classifier from ONNX and a
+  64-point Q15 DSP pipeline, prices every instruction with a cycle-exact
+  energy model, and evaluates active-mode optimization and periodic
+  Power-save scheduling in the Avrora simulator. All energy figures are
+  simulated.
+type: software
+authors:
+  - given-names: Partha Pratim
+    family-names: Gogoi
+version: 0.1.0
+license: MIT
+keywords:
+  - energy-aware compilation
+  - AVR
+  - ATmega128
+  - embedded systems
+  - TinyML
+  - digital signal processing
+  - Avrora

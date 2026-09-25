@@ -292,7 +292,7 @@ static int lower_requantize(InstrBuf *buf, const IrGraph *graph, const SramLayou
      * MinMax-calibrated per-tensor quantization on unbounded-support
      * inputs (confirmed empirically, not just in theory) and had to be
      * replaced with an exact check against the one fixed demo input this
-     * Phase A program actually runs. */
+     * ML program actually runs. */
     FixedMultiplier fm;
     if (compute_fixed_multiplier(ratio, &fm) != 0) {
         fprintf(stderr, "lower: requantize op %zu failed to derive a fixed-point multiplier\n", op_id);
@@ -410,20 +410,18 @@ static void lower_const16(InstrBuf *buf, int16_t value, uint16_t addr) {
  * from p1 through p3 so the real carry out of `adc p2,r1` threads into
  * `adc p3,sign`. Computing the sign byte in between clobbers that carry
  * with the unrelated one lsl/sbc produce internally, silently dropping
- * the cross term's overflow into p3 (found during Task 4 implementation,
+ * the cross term's overflow into p3 (found during implementation,
  * re-derived correctly, and cross-checked against this file's own working
  * precedent -- lower_matmul's sign-before-add ordering for the same class
  * of widen-and-accumulate -- plus a from-scratch AVR carry-flag simulation
  * over the known test vectors and 5000 random Q15 pairs; corrected here
- * before Task 4 was re-dispatched. See the 2026-08-03 spec amendment for
- * where this routine's existence and byte/instruction budget originate).
+ * before the FFT stages were built on it).
  * A single <<1 across the 3-byte accumulator then aligns the result --
  * NOT a 15-bit shift chain -- and the top two bytes are the Q15 product.
  * Truncates rather than rounds (no rounding-bias correction before the
  * shift): the result is exactly floor(x*y / 32768), i.e. (x*y) >> 15, which
  * the FFT and full-pipeline tests check bit-exactly against integer oracles.
- * Measured through the real avr-gcc while writing the Milestone 6 spec's
- * 2026-08-03 amendment: 72 bytes, 30 instructions (this instruction count
+ * Measured through the real avr-gcc: 72 bytes, 30 instructions (this instruction count
  * is unaffected by the sign-byte reordering -- same 7 instructions per
  * cross term, just reordered). */
 static void lower_fixed_mul_q15(InstrBuf *buf, uint16_t a_addr, uint16_t b_addr, uint16_t out_addr) {
@@ -566,8 +564,8 @@ size_t dsp_bit_reverse_index_test_hook(size_t i, int bits) {
 
 /* ---- OP_FFT_BUTTERFLY: one radix-2 decimation-in-time stage ----
  *
- * Convention, taken from the repository rather than assumed: radix-2 DIT
- * (spec v2 sections on the DSP workload), bit-reversal applied BEFORE the
+ * Convention, taken from the repository rather than assumed: radix-2 DIT,
+ * bit-reversal applied BEFORE the
  * stages (dsp_build.c pushes OP_BIT_REVERSE then six OP_FFT_BUTTERFLY), and
  * a forward transform, since the twiddle generator uses
  * angle = -2*pi*k/N, i.e. W^k = e^(-2*pi*i*k/N).
@@ -1102,7 +1100,7 @@ static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *
  * in-distribution) inputs produce -- confirmed empirically against this
  * project's own export/export_model.py calibration, not just in theory.
  *
- * What Phase A actually needs is narrower and fully decidable: this
+ * What the ML path actually needs is narrower and fully decidable: this
  * program is compiled for exactly one fixed, compile-time-known
  * `demo_input`, not an arbitrary future one (see REPORT.md's limitations
  * on that scope cut). So instead of bounding all possible inputs, this
@@ -1193,7 +1191,7 @@ int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_inpu
                 for (size_t k = 0; k < n; k++) vals[i][k] = vals[op->inputs[0]][k];
                 break;
             default:
-                fprintf(stderr, "lower: op %zu has OpKind %d, which is out of scope for Phase A (ML path only)\n",
+                fprintf(stderr, "lower: op %zu has OpKind %d, which is out of scope for the ML lowering path\n",
                         i, (int)op->kind);
                 rc = -1;
                 break;

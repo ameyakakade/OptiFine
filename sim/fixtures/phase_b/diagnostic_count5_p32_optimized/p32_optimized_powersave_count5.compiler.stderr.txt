@@ -1,5 +1,0 @@
-periodic policy: powersave
-periodic timer prescaler: 32 (Timer0 divisor)
-periodic inference count: 5
-periodic initialization predicted cost: 673 cycles, 1909.637 nJ
-periodic per-inference predicted compute cost: 5344 cycles, 15163.600 nJ

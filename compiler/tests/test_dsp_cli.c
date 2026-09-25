@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
         assert(rc != 0 && WEXITSTATUS(rc) == 2);
         printf("  '%s': usage error\n", bad[i]);
     }
-    /* Phase B: --dsp inside the periodic wrapper, both wait policies. */
+    /* Periodic scheduling: --dsp inside the periodic wrapper, both wait policies. */
     const char *policies[] = {"active", "powersave"};
     for (int p = 0; p < 2; p++) {
         snprintf(out, sizeof(out), "%s/dsp_cli_periodic_%s.S", g_dir, policies[p]);

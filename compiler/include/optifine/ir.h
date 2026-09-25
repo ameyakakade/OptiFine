@@ -1,7 +1,6 @@
-/* Module 4: typed op graph shared by both workload paths (spec v2 section
- * 6.1). No lexer/parser -- ingest.c builds the ML side from the ONNX
- * protobuf, the DSP side is constructed directly via a builder API
- * (spec v2 section 6.2). */
+/* Typed op graph shared by both workload paths. No lexer/parser --
+ * ingest.c builds the ML side from the ONNX protobuf, the DSP side is
+ * constructed directly via a builder API (dsp_build.h). */
 #ifndef OPTIFINE_IR_H
 #define OPTIFINE_IR_H
 

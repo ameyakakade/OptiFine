@@ -1,5 +1,5 @@
 /* Single-candidate AVR lowering for every op of both paths: the ML path
- * (Input, Const, MatMul, Add, Relu, Requantize, Output -- Phase A's naive
+ * (Input, Const, MatMul, Add, Relu, Requantize, Output -- the naive
  * baseline) and the DSP path (Window, BitReverse, FftButterfly, Magnitude,
  * PeakExtract, with counted loops). lower_op always produces exactly one real,
  * correct candidate per op, using regalloc's always-spill assignment;
@@ -25,7 +25,7 @@
 int lower_init_zero_reg(const CostModel *cost_model, Candidate *out);
 
 /* Pre-pass: evaluates the real forward pass for `demo_input` (the one
- * fixed, compile-time-known input this Phase A program actually runs) in
+ * fixed, compile-time-known input this ML program actually runs) in
  * host int64 arithmetic, using the same fixed-point Requantize logic
  * lower_op's generated AVR code uses. Must be called once, before any
  * lower_op call, so a Requantize overflow is caught before any codegen is
@@ -38,7 +38,7 @@ int lower_init_zero_reg(const CostModel *cost_model, Candidate *out);
 int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_input, size_t demo_input_len);
 
 /* Lowers a single IrOp (graph->ops[op_id]) into exactly one naive, correct
- * Candidate. `regalloc` is consulted (Phase A always takes the SRAM-spill
+ * Candidate. `regalloc` is consulted (the naive path always takes the SRAM-spill
  * branch, regalloc->assignment[op_id] == -1 -- asserted, not silently
  * assumed). `demo_input`/`demo_input_len` are only read when
  * graph->ops[op_id].kind == OP_INPUT.
@@ -80,7 +80,7 @@ int lower_dsp_program_end(const IrGraph *graph, const CostModel *cost_model, Can
 /* Just the program-memory constant data lower_dsp_program_end places after its
  * break -- the twiddle table if the graph has FFT stages, otherwise an empty
  * candidate -- for a program whose terminating code is written elsewhere (the
- * Phase B periodic wrapper). The caller must place it where control flow
+ * periodic scheduling wrapper). The caller must place it where control flow
  * cannot reach it. */
 int lower_dsp_constant_data(const IrGraph *graph, const CostModel *cost_model, Candidate *out);
 

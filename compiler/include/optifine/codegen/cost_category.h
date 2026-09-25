@@ -1,13 +1,13 @@
 /* Maps a literal AVR opcode mnemonic (as emitted to .s, e.g. "muls") to the
- * cost_table.toml category key that prices it (e.g. "MUL"). Per SOURCES.md /
- * spec v2 section 12, every cost_table.toml entry reduces to
- * cycles(instruction) x a single per-cycle constant -- every 1-cycle
- * category is numerically identical (10.625 nJ) and every 2-cycle category
- * is numerically identical (21.25 nJ). So which same-cycle-count category a
+ * cost_table.toml category key that prices it (e.g. "MUL"). Per SOURCES.md,
+ * every cost_table.toml entry reduces to cycles(instruction) x a single
+ * per-cycle constant -- every 1-cycle category is numerically identical
+ * (2.8375 nJ) and every 2-cycle category is numerically identical
+ * (5.675 nJ). So which same-cycle-count category a
  * new opcode maps to changes zero energy numbers; this table exists for
  * traceability, not because the specific choice is load-bearing. Dedicated
  * cost_table.toml rows with real AVR Instruction Set Manual section
- * citations for these opcodes are deferred to milestone 7's sourcing pass. */
+ * citations for these opcodes are future work. */
 #ifndef OPTIFINE_CODEGEN_COST_CATEGORY_H
 #define OPTIFINE_CODEGEN_COST_CATEGORY_H
 

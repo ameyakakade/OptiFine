@@ -1,32 +1,26 @@
-compiler/build/
-compiler/build_check/
+# Build trees. Retained experimental evidence lives in sim/fixtures/ and is
+# tracked deliberately; anything under build/ is regenerable scratch output.
 compiler/build*/
-# Local demo/scratch output. Canonical experimental artifacts live in
-# sim/fixtures/ and are tracked deliberately; anything under build/ is
-# regenerable and must never be confused with retained evidence.
 /build/
 *.o
 *.elf
+compile_commands.json
+
+# Python
 __pycache__/
 *.pyc
 .venv/
-compile_commands.json
-
-# Downloaded/extracted third-party toolchain -- tools/setup_linux.sh
-# populates this from public releases; large binaries do not belong in git.
-tools/avrora.jar
-tools/jdk8*/
 .pytest_cache/
 
-# subagent-driven-development scratch workspace (ledgers, briefs, review
-# packages) -- process artifacts, not part of the deliverable.
-.superpowers/
+# Third-party toolchain downloaded by tools/setup_linux.sh; never committed.
+tools/avrora.jar
+tools/jdk8*/
 
 # Editor, OS and local tool state
 .vscode/
 .idea/
 *.swp
 .DS_Store
-.claude/
+
 # JVM crash logs (Avrora)
 hs_err_pid*.log

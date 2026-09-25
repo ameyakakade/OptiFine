@@ -1,8 +1,8 @@
-/* ONNX protobuf -> IrGraph. Milestone 3.
+/* ONNX protobuf -> IrGraph.
  *
  * Scope: only enough of the ONNX graph proto to build the OpKind set in
  * ir.h (Input, Const, MatMul, Add, Relu, Requantize, Output). No general
- * ONNX operator coverage -- see spec section 9 (non-goals). */
+ * ONNX operator coverage (a non-goal; see REPORT.md's limitations). */
 #ifndef OPTIFINE_INGEST_H
 #define OPTIFINE_INGEST_H
 

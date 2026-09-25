@@ -1,5 +1,0 @@
-compute_path,prescaler,period_cycles,inferences,active_nj,powersave_nj,saved_nj,saving_pct,nj_per_inference,active_cycles,powersave_cycles,deadline_status,output_status,status,rejection_reason
-dsp,8,,,,,,,,,,,,rejected,"static deadline rejection: compiler predicted BODY cycles 147565 are not below the 2048-cycle Timer0 overflow interval (compute-bound, no idle window); no Avrora SRAM readback is claimed"
-dsp,32,,,,,,,,,,,,rejected,"static deadline rejection: compiler predicted BODY cycles 147565 are not below the 8192-cycle Timer0 overflow interval (compute-bound, no idle window); no Avrora SRAM readback is claimed"
-dsp,128,,,,,,,,,,,,rejected,"static deadline rejection: compiler predicted BODY cycles 147565 are not below the 32768-cycle Timer0 overflow interval (compute-bound, no idle window); no Avrora SRAM readback is claimed"
-dsp,1024,262144,1,743836.8768000003,424239.10867499956,319597.76812500076,42.96610965295457,424239.10867499956,262144,262144,met,matched,accepted,

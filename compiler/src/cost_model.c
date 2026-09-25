@@ -5,7 +5,7 @@
 #include <ctype.h>
 
 /* Hand-rolled parser for the flat `NAME = { energy_nj = X, source = "..." }`
- * shape cost_table.toml uses (see spec section 5.3). If the table grows
+ * shape cost_table.toml uses. If the table grows
  * beyond that one shape, replace this with a real TOML library rather than
  * extending the parsing by hand. */
 

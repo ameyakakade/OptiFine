@@ -1,5 +1,4 @@
-/* DSP pipeline construction -- builder API, not a parser (spec v2 section
- * 6.2). Unlike the ML path there is no standard portable graph format for a
+/* DSP pipeline construction -- builder API, not a parser. Unlike the ML path there is no standard portable graph format for a
  * fixed-size audio pipeline to ingest from, so the IR is constructed
  * directly here instead of parsed from a file. */
 #ifndef OPTIFINE_DSP_BUILD_H
@@ -7,9 +6,9 @@
 
 #include "optifine/ir.h"
 
-/* Fixed transform size for Phase 1 (spec v2 section 3: exactly one
- * hardcoded, power-of-2 transform length -- no runtime-configurable size).
- * 64 was picked over 128 as the smaller of the two spec-allowed sizes. */
+/* Fixed transform size: exactly one hardcoded, power-of-2 transform length
+ * -- no runtime-configurable size. 64 was picked over 128 as the smaller of
+ * the two sizes considered. */
 #define DSP_FFT_SIZE 64
 #define DSP_FFT_LOG2 6  /* log2(DSP_FFT_SIZE) = number of butterfly stages */
 

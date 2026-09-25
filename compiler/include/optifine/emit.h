@@ -34,8 +34,8 @@ int emit_candidate(EmitUnit *unit, const Candidate *candidate, FILE *out);
 int emit_program_prologue(FILE *out);
 
 /* Writes the trailing `break` that halts Avrora's simulation. Not priced
- * through the cost model (matches the existing hand-written fixtures in
- * sim/fixtures/, none of which price their own `break` either) -- it is a
+ * through the cost model (as in the hand-written sim/smoke.s, which does
+ * not price its `break` either) -- it is a
  * simulation-harness artifact, not part of a real deployed program's
  * energy budget. Returns 0 on success. */
 int emit_program_epilogue(FILE *out);

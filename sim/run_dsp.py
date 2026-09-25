@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Capture, check and compare the canonical complete-DSP baseline.
 
-The DSP counterpart of Phase A's retained Avrora evidence, with Phase B's
-provenance discipline: raw tool output is retained verbatim, every derived
-figure is recomputed from it by ``sim/report_results.py``, and a manifest pins
-each raw file, each recorded input and the tools by SHA-256.
+Raw tool output is retained verbatim, every derived figure is recomputed from
+it by ``sim/report_results.py``, and a manifest pins each raw file, each
+recorded input and the tools by SHA-256, with the source commit it ran from.
 
 Modes:
 
@@ -79,7 +78,7 @@ def first_line(cmd: list[str]) -> str:
 
 def write_generated(out_dir: Path) -> None:
     dsp = report_results.dsp(out_dir)
-    (out_dir / "results.md").write_text(report_results.render_dsp_markdown(dsp, out_dir, report_results.phase_a()),
+    (out_dir / "results.md").write_text(report_results.render_dsp_markdown(dsp, out_dir, report_results.active_ml()),
                                         encoding="utf-8")
     (out_dir / "results.csv").write_text(report_results.render_dsp_csv(dsp), encoding="utf-8")
 
@@ -101,8 +100,7 @@ def mode_capture(args: argparse.Namespace) -> int:
         return 1
     (out / "dsp.compile.txt").write_text(r.stderr, encoding="utf-8")
 
-    # Repo-relative path, as the Phase A fixtures were run, so the raw report
-    # names no machine-specific directory.
+    # Repo-relative path, so the raw report names no machine-specific directory.
     sim_cmd = ["bash", "sim/run_avrora.sh", rel(out / "dsp.s")]
     r = run(sim_cmd)
     (out / "dsp.avrora.txt").write_text(r.stdout + r.stderr, encoding="utf-8")
@@ -175,7 +173,7 @@ def mode_check(args: argparse.Namespace) -> int:
         if sha256_file(out / name) != digest:
             failures.append(f"artifact {name} does not match its recorded hash")
     dsp = report_results.dsp(out)
-    expected_md = report_results.render_dsp_markdown(dsp, out, report_results.phase_a())
+    expected_md = report_results.render_dsp_markdown(dsp, out, report_results.active_ml())
     if (out / "results.md").read_text(encoding="utf-8") != expected_md:
         failures.append("results.md does not re-derive from the raw files")
     if (out / "results.csv").read_text(encoding="utf-8") != report_results.render_dsp_csv(dsp):

@@ -1,5 +1,0 @@
-dsp initialization (clr r2, input, window coefficients): 769 cycles, 2182.037 nJ (predicted)
-dsp pipeline (window .. output): 147565 cycles, 418715.687 nJ (predicted)
-dsp termination (break): 1 cycles, 2.837 nJ (predicted)
-total: 148335 cycles, 420900.562 nJ (predicted, break included; compare against a real sim/run_avrora.sh run for the actual simulated numbers)
-sram: 2517 bytes from 0x0200 (graph tensors + 181-byte DSP scratch)

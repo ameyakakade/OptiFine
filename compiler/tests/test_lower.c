@@ -152,9 +152,9 @@ static void assert_program_cost_zeroed_on_region_failure(const IrGraph *graph,
     fclose(out);
 }
 
-/* Runs the full 13-op graph through either lower_op directly (Phase A's
+/* Runs the full 13-op graph through either lower_op directly (the
  * naive baseline) or candidates_generate + select_min_energy +
- * locality_optimize (milestone 5's real candidate diversity), executes
+ * locality_optimize (active-mode optimization), executes
  * every emitted instruction through the AVR interpreter, and checks the
  * final OP_OUTPUT bytes against the independently-computed golden
  * reference within +/-1 LSB. Both paths must produce a numerically

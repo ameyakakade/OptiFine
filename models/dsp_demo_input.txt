@@ -1,7 +1,7 @@
 # DSP demo input: 64 int16 Q15 samples for `optifine --dsp` (default --input).
 # x[n] = 0.3 sin(2 pi 5 n / 64) + 0.2 sin(2 pi 12 n / 64), scaled by 32767 and
 # rounded: two tones on exact bins 5 and 12, so the expected peaks are known.
-# Signal as specified in the milestone 6 plan (Task 10).
+# Signal chosen so the pipeline's top peaks are known in advance.
 0 10688 12807 7275 2528 3728 6552 3201
 -6951 -15461 -14275 -5091 2792 3471 827 2615
 9830 14724 10095 -1544 -10315 -10107 -5007 -3352

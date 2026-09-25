@@ -33,15 +33,14 @@ static const CategoryEntry kCategories[] = {
     {"asr", "SUB"},     /* 1-cycle bucket, arbitrary within-bucket choice */
     {"ror", "SUB"},     /* 1-cycle bucket, arbitrary within-bucket choice */
 
-    /* --- DSP counted-loop machinery (milestone 6) ---
+    /* --- DSP counted-loop machinery ---
      *
      * All nine map onto categories that already exist rather than adding new
      * ones, for a specific reason: `cost_table.toml` is a recorded input of
-     * the retained Phase B experiment (`sim/fixtures/phase_b/manifest.json`
-     * pins its SHA-256), so extending that file would invalidate the
-     * canonical result's provenance for opcodes the ML path never emits.
+     * every retained experiment (each manifest under `sim/fixtures/` pins
+     * its SHA-256), so it is kept to the categories the ML path established.
      * Reusing categories costs nothing, because every entry is
-     * `cycles x one constant` (spec v2 section 12) and these are placed by
+     * `cycles x one constant` (SOURCES.md) and these are placed by
      * cycle count.
      *
      * Pointer loads/stores are genuinely the 2-cycle SRAM access
@@ -86,10 +85,9 @@ static const CategoryEntry kCategories[] = {
  *
  * `lpm` takes 3 cycles and every category in the table is 1 or 2, so there is
  * nothing honest to map it onto. Rather than add an entry -- cost_table.toml
- * is a recorded input of the retained Phase B experiment and changing it would
- * invalidate that provenance for an opcode the ML path never emits -- these
- * are priced directly as `cycles x the per-cycle constant`, which is precisely
- * what every category in the table already reduces to (spec v2 section 12).
+ * is a recorded input of every retained experiment -- these are priced
+ * directly as `cycles x the per-cycle constant`, which is precisely what
+ * every category in the table already reduces to (SOURCES.md).
  * The indirection through a category name is a lookup convenience, not part of
  * the energy model. */
 static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
@@ -99,8 +97,8 @@ static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
      * a long loop closes with an inverted BREQ over an RJMP instead. */
     {"rjmp", 2},
     /* BREAK halts the simulator and costs 1 cycle. This is the "+1 fixed
-     * harness overhead" the Phase A write-up already accounts for by hand
-     * (sim/fixtures/bringup_smoke.avrora.txt: 7 instruction cycles, 8
+     * harness overhead" of every simulated program
+     * (sim/fixtures/active_ml/smoke.avrora.txt: 7 instruction cycles, 8
      * reported); pricing it makes that constant explicit instead of magic. */
     {"break", 1},
 };

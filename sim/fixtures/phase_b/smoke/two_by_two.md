@@ -1,4 +1,0 @@
-| prescaler | compute_path | policy | total_nj | total_cycles | active_cycles | power_save_cycles | status | rejection_reason |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 32 | optimized | active | 110376.3987375 | 38899 | 38899 | 0 | rejected | simulated cycles must divide evenly by inference_count |
-| 32 | optimized | powersave | 64357.8273 | 39894 | 22395 | 17499 | rejected | simulated cycles must divide evenly by inference_count |

@@ -1,4 +1,4 @@
-/* Module 6: next-use based register allocation -- which values stay
+/* Next-use based register allocation -- which values stay
  * resident in AVR's limited register file vs. get reloaded from SRAM.
  * This is where most of the real engineering effort belongs.
  *
@@ -27,8 +27,8 @@
 typedef struct {
     /* ops[i].id -> 1 if this op's output has high next-use reuse (worth a
      * consumer keeping it register-resident instead of reloading from
-     * SRAM on each use), -1 if single-use (reload-per-use, Phase A's
-     * baseline behavior). Not a literal register number -- see the module
+     * SRAM on each use), -1 if single-use (reload-per-use, the naive
+     * baseline's behavior). Not a literal register number -- see the module
      * comment above for why. */
     int *assignment;
     size_t count;

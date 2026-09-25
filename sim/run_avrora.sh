@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Assembles an emitted .s file and runs it through Avrora's energy monitor.
-# Milestone 1: bring-up validated against vanilla Avrora Beta 1.7.115.
+# Validated against vanilla Avrora Beta 1.7.115.
 #
-# Reality notes (found during milestone 1, keep in sync with REPORT.md):
+# Notes (keep in sync with REPORT.md):
 # - Avrora 1.7.115 has no atmega328p/atmega2560 MCU classes; the closest
 #   supported target is ATmega128 (`-mcu=atmega128`). We compile for and
 #   simulate ATmega128 and state this deviation plainly in the report.
@@ -10,7 +10,7 @@
 #   parser (parse_report.py) converts to nJ.
 # - Avrora 1.7.115 references the long-removed java.lang.Compiler class and
 #   crashes with NoClassDefFoundError on JDK 9+. Needs a JDK 8 JVM -- point
-#   JAVA_HOME at one (this repo was validated against Zulu 8).
+#   JAVA_HOME at one (tools/setup_linux.sh installs Temurin 8u504).
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
@@ -35,8 +35,7 @@ else
     AVRORA_JAR="$ROOT/tools/avrora.jar"
 fi
 
-# JAVA_HOME (documented, legacy) > JAVA8_BIN env var (matches
-# run_phase_b.py) > tools/setup_linux.sh's vendored JDK 8 > `java` on
+# JAVA_HOME > JAVA8_BIN env var (as sim/run_periodic_ml.py reads it) > tools/setup_linux.sh's vendored JDK 8 > `java` on
 # PATH, which is only correct if it happens to be a JDK 8 (see the note
 # above about NoClassDefFoundError on JDK 9+).
 if [ -n "${JAVA_HOME:-}" ]; then

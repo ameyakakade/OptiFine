@@ -2,18 +2,18 @@
 # real. Full citations (URLs, page numbers, exact table figures) are in
 # SOURCES.md.
 #
-# Per spec v2 section 12 (amendment, 2026-08-26): no source available to
-# this project -- not the AVR datasheets, not the JouleTrack paper, not
-# Avrora's own energy monitor -- supports differentiating energy by
+# Energy model: no source available to this project -- not the AVR
+# datasheets, not the JouleTrack paper, not Avrora's own energy monitor --
+# supports differentiating energy by
 # instruction *type* within CPU active mode. Every entry below is therefore
 # `cycles(instruction) x a single per-cycle constant`.
 #
-# Per spec v2 section 13 (amendment, 2026-08-27): the per-cycle constant is
-# calibrated to Avrora's OWN built-in ATmega128 power model (3.0V,
+# Calibration: the per-cycle constant is calibrated to Avrora's OWN
+# built-in ATmega128 power model (3.0V,
 # 7.5667mA active current, decompiled from avrora.jar's
 # avrora.sim.mcu.ATMega128.class), not the ATmega128 datasheet's 5V/17mA
 # row used in an earlier version of this file. Avrora is this project's
-# ground-truth benchmark -- Phase A's real end-to-end run showed the
+# ground-truth benchmark -- the first real end-to-end ML run showed the
 # datasheet-derived constant (10.625 nJ/cycle) overstated Avrora's actual
 # simulated energy by ~3.75x, even though predicted and real cycle counts
 # matched almost exactly. Recalibrating to Avrora's own assumption makes

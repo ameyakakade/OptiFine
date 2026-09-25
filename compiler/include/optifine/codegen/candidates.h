@@ -1,4 +1,4 @@
-/* Module 6: candidate instruction sequences. For each IrOp, codegen must
+/* Candidate instruction sequences. For each IrOp, codegen must
  * produce at least two provably-equivalent candidates that differ in
  * register/memory access pattern, addressing mode, or operand order.
  *

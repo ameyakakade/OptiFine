@@ -18,7 +18,7 @@ void candidate_free(Candidate *candidate) {
  * regalloc.h's next-use analysis) into free registers ONCE, then reuses
  * it via `mov` (1 cycle) instead of re-`lds`-ing it from SRAM (2 cycles)
  * on every one of the N output channels that need it. This is the
- * dominant redundancy in Phase A's naive baseline (lower.c's static
+ * dominant redundancy in the naive baseline (lower.c's static
  * lower_matmul): fc1's MatMul re-loads its 16-byte input 8 times (128
  * loads for 16 unique bytes); this candidate loads each byte once, up to
  * MATMUL_CACHE_POOL_SIZE. Weight bytes are never reused -- each (n,k)
@@ -123,7 +123,7 @@ size_t candidates_generate(const IrGraph *graph, size_t op_id,
     size_t n = 0;
 
     /* Candidate 1: the existing, always-correct spill lowering (every
-     * value reloaded from SRAM per use) -- Phase A's baseline, and always
+     * value reloaded from SRAM per use) -- the naive baseline, and always
      * a valid fallback for every OpKind. */
     if (lower_op(graph, op_id, layout, regalloc, cost_model, demo_input, demo_input_len, &out_candidates[n]) != 0) {
         fprintf(stderr, "candidates_generate: op %zu failed to lower\n", op_id);

@@ -1,4 +1,4 @@
-/* Module 7: memory locality pass. SRAM access costs meaningfully more
+/* Memory locality pass. SRAM access costs meaningfully more
  * energy than register arithmetic on AVR-class hardware -- reorder
  * instructions / restructure loop tiling within a basic block to maximize
  * register/data reuse and reduce redundant loads. */

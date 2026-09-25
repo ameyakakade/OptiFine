@@ -1,4 +1,4 @@
-/* Deterministic SRAM address allocation for Phase A's naive codegen
+/* Deterministic SRAM address allocation for the naive ML codegen
  * (compiler/src/codegen/lower.c). regalloc_next_use always reports every
  * op's output value as spilled (-1, see regalloc.c) -- this module decides
  * *where* each spilled value lives in SRAM: one contiguous slot per op, in
@@ -13,8 +13,8 @@
 
 /* Base address: clears the ATmega128's I/O (0x0000-0x001F) and extended
  * I/O (0x0020-0x005F) memory-mapped register space, and sits above the
- * hand-written ms1/ms2 fixtures' scratch addresses (0x0100 range) in
- * sim/fixtures/, for visual distinction from those hand-written fixtures. */
+ * 0x0100 scratch address the hand-written sim/smoke.s uses, so the two are
+ * visually distinct. */
 #define SRAM_LAYOUT_BASE 0x0200
 /* ATmega128 has 4096 bytes of internal SRAM starting at 0x0100 (exclusive
  * upper bound of the valid address range). */

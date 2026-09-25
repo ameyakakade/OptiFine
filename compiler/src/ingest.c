@@ -313,7 +313,7 @@ int ingest_load_onnx(const char *path, IrGraph *out) {
         int ok;
         OpKind kind = op_kind_from_type(node.op_type, &ok);
         if (!ok) {
-            /* Unsupported op_type -- spec section 9 non-goal: no general
+            /* Unsupported op_type -- a deliberate non-goal: no general
              * ONNX operator coverage beyond this project's own op set. */
             ir_graph_free(out);
             free(buf);

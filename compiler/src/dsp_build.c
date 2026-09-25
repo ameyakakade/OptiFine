@@ -46,7 +46,7 @@ int dsp_build_pipeline(IrGraph *out) {
                                           shape1(DSP_FFT_SIZE), 1, DT_FIXED_Q15, NULL);
     {
         /* Hamming window, computed host-side via libm at compiler-build
-         * time (spec v2's "everything compile-time-baked" philosophy --
+         * time (everything is baked in at compile time --
          * no target-side trigonometry, no runtime coefficient generation). */
         int16_t *coeffs = malloc(DSP_FFT_SIZE * sizeof(int16_t));
         for (int n = 0; n < DSP_FFT_SIZE; n++) {

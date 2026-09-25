@@ -1,36 +1,7 @@
-# Shell scripts must be LF -- a CRLF `#!/usr/bin/env bash` script fails to
-# parse on Linux/macOS (found empirically: sim/run_avrora.sh checked out
-# with CRLF line endings threw a bash syntax error on this project's own
-# elif branches). Every other tracked text file may still carry whatever
-# line ending Windows checkouts have used so far; this only forces the
-# one file type where the wrong ending is a functional bug, not a style
-# issue.
-*.sh text eol=lf
-
-# Recorded inputs of the canonical Phase B experiment. The manifest at
-# sim/fixtures/phase_b/manifest.json pins each of these by SHA-256, and those
-# hashes were taken on Windows, so they are hashes of the CRLF byte sequence.
-# git stores them LF (core.autocrlf=input), which means a Linux or macOS
-# checkout would otherwise materialise a different byte sequence and fail the
-# provenance check on a file nobody had touched -- pinning the canonical
-# result to the machine that produced it. Forcing the checkout ending
-# reproduces the recorded bytes everywhere, which is what the manifest is
-# actually asserting. Found during the milestone-6 hardening pass; the
-# alternative, rewriting the manifest to LF hashes, would have destroyed the
-# provenance rather than preserved it.
-cost_table.toml text eol=crlf
-models/tiny_classifier_golden_input.txt text eol=crlf
-models/tiny_classifier_golden_output.txt text eol=crlf
-
-# Recorded input and retained artifacts of the canonical DSP baseline. Their
-# SHA-256s in sim/fixtures/dsp/manifest.json were taken over LF bytes; pinning
-# the checkout ending keeps `python3 sim/run_dsp.py check` true on every OS,
-# the same reason the Phase B inputs above are pinned to the ending they were
-# hashed with.
-models/dsp_demo_input.txt text eol=lf
-sim/fixtures/dsp/* text eol=lf
-models/dsp_demo_golden_output.txt text eol=lf
-# The DSP Phase B sweep: sim/fixtures/phase_b_dsp/manifest.json hashes these
-# as LF bytes. The ELFs next to them are rebuilt, never committed.
-sim/fixtures/phase_b_dsp/* text eol=lf
-sim/fixtures/phase_b_dsp/*.elf binary
+# Every text file is checked out with LF endings on every OS. The evidence
+# manifests (sim/fixtures/*/manifest.json) record SHA-256s of the recorded
+# inputs and raw artifacts as LF bytes, so a checkout must reproduce those
+# bytes exactly -- and a CRLF shell script fails to parse on Linux/macOS.
+* text=auto eol=lf
+*.onnx binary
+*.elf binary

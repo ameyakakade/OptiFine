@@ -16,7 +16,7 @@ static int emitf(FILE *out, const char *format, ...) {
 }
 
 /* Returns the exact ATmega128 Timer0 CS02:0 encoding for the supported
- * asynchronous-clock divisors. This helper is kept here so the Task 3 AVR
+ * asynchronous-clock divisors. This helper is kept here so the AVR
  * wrapper emits the same encoding that validation accepts. */
 static int timer0_clock_select_bits(uint16_t prescaler, uint8_t *out_bits) {
     switch (prescaler) {
@@ -113,7 +113,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
     out_cost->overrun_addr = (uint16_t)(scheduler_start + 2);
     out_cost->completed_addr = (uint16_t)(scheduler_start + 3);
 
-    /* Preserve Task 2's allocation-query behavior for callers that only need
+    /* The allocation-only query, for callers that only need
      * the scheduler addresses and intentionally provide no output stream. */
     if (out == NULL) {
         return 0;

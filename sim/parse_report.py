@@ -1,8 +1,8 @@
 """Parses per-component energy output from Avrora's -monitors=energy report
-and prints/returns a structured comparison. See spec section 6.7.
+and prints/returns a structured comparison.
 
-Real Avrora Beta 1.7.115 output (validated in milestone 1, see
-sim/fixtures/bringup_smoke.avrora.txt):
+Real Avrora Beta 1.7.115 output (the bring-up calibration run retained in
+sim/fixtures/active_ml/smoke.avrora.txt):
 
     =={ Energy consumption results for node 0 }===================================
     Node lifetime: 8 cycles,  1.0E-6 seconds

@@ -3,20 +3,21 @@
 
 Every number this prints is computed here from a retained raw file:
 
-  Active-mode results  from ``sim/fixtures/classifier_{naive,optimized}.avrora.txt`` --
-           Avrora's own energy report for the two compiled classifier builds.
-  Periodic scheduling (ML)  from ``sim/fixtures/phase_b/*.avrora.txt`` -- the steady-state
-           differential ``E(count=5) - E(count=4)`` per variant, which cancels
-           one-time initialisation and the two policies' different wrapper
-           lengths.
-  Periodic scheduling (DSP)  from ``sim/fixtures/phase_b_dsp/`` -- the same steady-state
-           differential over the DSP pipeline in the periodic wrapper, per
-           prescaler, with the compiler's own compute prediction and
-           ``avr-size`` of each periodic program.
+  Active-mode (ML)  from ``sim/fixtures/active_ml/{naive,optimized}.avrora.txt``
+           -- Avrora's own energy report for the two compiled classifier
+           builds, captured by ``sim/run_active_ml.py``.
   DSP      from ``sim/fixtures/dsp/`` -- the complete ``optifine --dsp``
            program's Avrora report, the compiler's own cost printout,
            ``avr-size -A`` of the linked ELF, and ``test_dsp_pipeline``'s
            per-op prediction, captured by ``sim/run_dsp.py``.
+  Periodic (ML)  from ``sim/fixtures/periodic_ml/*.avrora.txt`` -- the
+           steady-state differential ``E(count=5) - E(count=4)`` per variant,
+           which cancels one-time initialisation and the two policies'
+           different wrapper lengths.
+  Periodic (DSP)  from ``sim/fixtures/periodic_dsp/`` -- the same steady-state
+           differential over the DSP pipeline in the periodic wrapper, per
+           prescaler, with the compiler's own compute prediction and
+           ``avr-size`` of each periodic program.
 
 Nothing here runs a tool, writes into ``sim/fixtures``, or consults a manifest.
 It reads raw simulator output and does arithmetic, so a figure in the report
@@ -39,9 +40,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "sim" / "fixtures"
-PHASE_B = FIXTURES / "phase_b"
+ACTIVE_ML = FIXTURES / "active_ml"
 DSP = FIXTURES / "dsp"
-PHASE_B_DSP = FIXTURES / "phase_b_dsp"
+PERIODIC_ML = FIXTURES / "periodic_ml"
+PERIODIC_DSP = FIXTURES / "periodic_dsp"
 DSP_PRESCALERS = (8, 32, 128, 1024)
 
 #: Target clock and memory sizes the DSP figures are expressed against.
@@ -109,9 +111,9 @@ def parse_energy(path: Path) -> dict[str, float | int]:
     }
 
 
-def phase_a() -> dict[str, object]:
-    naive = parse_energy(FIXTURES / "classifier_naive.avrora.txt")
-    opt = parse_energy(FIXTURES / "classifier_optimized.avrora.txt")
+def active_ml(directory: Path = ACTIVE_ML) -> dict[str, object]:
+    naive = parse_energy(directory / "naive.avrora.txt")
+    opt = parse_energy(directory / "optimized.avrora.txt")
     d_cycles = opt["cycles"] - naive["cycles"]
     d_energy = opt["cpu_nj"] - naive["cpu_nj"]
     return {
@@ -129,8 +131,8 @@ def phase_a() -> dict[str, object]:
 
 def _marginal(prescaler: int, path: str, policy: str) -> dict[str, float]:
     stem = f"p{prescaler}_{path}_{policy}"
-    n4 = parse_energy(PHASE_B / f"{stem}.avrora.txt")
-    n5 = parse_energy(PHASE_B / f"{stem}_n5.avrora.txt")
+    n4 = parse_energy(PERIODIC_ML / f"{stem}.avrora.txt")
+    n5 = parse_energy(PERIODIC_ML / f"{stem}_n5.avrora.txt")
     return {
         "nj": n5["cpu_nj"] - n4["cpu_nj"],
         "active_cycles": n5["active_cycles"] - n4["active_cycles"],
@@ -138,7 +140,7 @@ def _marginal(prescaler: int, path: str, policy: str) -> dict[str, float]:
     }
 
 
-def phase_b() -> list[dict[str, object]]:
+def periodic_ml() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for prescaler in ACCEPTED_PRESCALERS:
         cell = {p: {c: _marginal(prescaler, c, p) for c in ("naive", "optimized")}
@@ -253,7 +255,7 @@ def dsp(directory: Path = DSP) -> dict[str, object]:
     }
 
 
-def phase_b_dsp(directory: Path = PHASE_B_DSP) -> dict[str, object]:
+def periodic_dsp(directory: Path = PERIODIC_DSP) -> dict[str, object]:
     """DSP under the periodic wrapper, per prescaler, from the raw files.
 
     A prescaler whose Timer0 period is not longer than the compiler-predicted
@@ -261,10 +263,10 @@ def phase_b_dsp(directory: Path = PHASE_B_DSP) -> dict[str, object]:
     is reported as such rather than given an energy figure. Otherwise the
     energies are the E(count=5) - E(count=4) increments; the busy-wait
     increment is scaled to the exact period when it lies within the poll
-    loop's window of it (see sim/run_phase_b_dsp.py, which applies the same
+    loop's window of it (see sim/run_periodic_dsp.py, which applies the same
     rule and records it).
     """
-    from run_phase_b_dsp import POLL_LOOP_CYCLES, TIMER0_PERIOD_CYCLES_PER_DIVISOR
+    from run_periodic_dsp import POLL_LOOP_CYCLES, TIMER0_PERIOD_CYCLES_PER_DIVISOR
 
     rows = []
     for d in DSP_PRESCALERS:
@@ -305,7 +307,7 @@ def phase_b_dsp(directory: Path = PHASE_B_DSP) -> dict[str, object]:
     return {"rows": rows}
 
 
-def render_phase_b_dsp_markdown(b: dict[str, object]) -> str:
+def render_periodic_dsp_markdown(b: dict[str, object]) -> str:
     o = StringIO()
     w = o.write
     w("## Periodic scheduling results: DSP pipeline\n\n")
@@ -330,7 +332,7 @@ def render_phase_b_dsp_markdown(b: dict[str, object]) -> str:
             continue
         w(f"\nAt prescaler {r['prescaler']} the Power-save period splits into "
           f"{r['powersave_active_cycles']:,} Active and {r['powersave_sleep_cycles']:,} Power-save cycles. The\n")
-        w(f"busy-wait increment measured {r['busy_wait_increment_cycles']:,} cycles: its 8-cycle poll loop detects\n")
+        w(f"busy-wait increment is {r['busy_wait_increment_cycles']:,} cycles: its 8-cycle poll loop detects\n")
         w("each wake up to 8 cycles late, and with this body the detection phase does not settle, so\n")
         w(f"its energy is scaled to the exact {r['period_cycles']:,}-cycle period (all of it Active cycles at\n")
         w("constant power). The periodic program links at "
@@ -387,7 +389,7 @@ def render_dsp_markdown(d: dict[str, object], directory: Path = DSP, a: dict[str
 def render_dsp_csv(d: dict[str, object]) -> str:
     o = StringIO()
     wr = csv.writer(o, lineterminator="\n")
-    wr.writerow(["phase", "metric", "variant", "prescaler", "value", "unit"])
+    wr.writerow(["section", "metric", "variant", "prescaler", "value", "unit"])
     for key, value, unit in (
         ("cycles", d["cycles"], "cycles"),
         ("predicted_cycles", d["predicted_cycles"], "cycles"),
@@ -398,10 +400,10 @@ def render_dsp_csv(d: dict[str, object]) -> str:
         ("text", d["text"], "B"), ("data", d["data"], "B"), ("bss", d["bss"], "B"),
         ("sram", d["sram_bytes"], "B"),
     ):
-        wr.writerow(["DSP", key, "complete", "", value, unit])
+        wr.writerow(["dsp", key, "complete", "", value, unit])
     for name, cyc, size in d["breakdown"]:
-        wr.writerow(["DSP", "part_cycles", name, "", cyc, "cycles"])
-        wr.writerow(["DSP", "part_code_bytes", name, "", size, "B"])
+        wr.writerow(["dsp", "part_cycles", name, "", cyc, "cycles"])
+        wr.writerow(["dsp", "part_code_bytes", name, "", size, "B"])
     return o.getvalue()
 
 
@@ -455,7 +457,7 @@ def render_markdown(a: dict[str, object], b: list[dict[str, object]], d: dict[st
         w(render_dsp_markdown(d, DSP, a))
     if bd is not None:
         w("\n")
-        w(render_phase_b_dsp_markdown(bd))
+        w(render_periodic_dsp_markdown(bd))
     return o.getvalue()
 
 
@@ -463,36 +465,36 @@ def render_csv(a: dict[str, object], b: list[dict[str, object]], d: dict[str, ob
                bd: dict[str, object] | None = None) -> str:
     o = StringIO()
     wr = csv.writer(o, lineterminator="\n")
-    wr.writerow(["phase", "metric", "variant", "prescaler", "value", "unit"])
+    wr.writerow(["section", "metric", "variant", "prescaler", "value", "unit"])
     n, p = a["naive"], a["optimized"]
     for label, rec in (("naive", n), ("optimized", p)):
-        wr.writerow(["A", "cycles", label, "", rec["cycles"], "cycles"])
-        wr.writerow(["A", "cpu_energy", label, "", f"{rec['cpu_nj']:.6f}", "nJ"])
-    wr.writerow(["A", "delta_cycles", "optimized-naive", "", a["delta_cycles"], "cycles"])
-    wr.writerow(["A", "delta_energy", "optimized-naive", "", f"{a['delta_nj']:.6f}", "nJ"])
-    wr.writerow(["A", "delta_pct", "optimized-naive", "", f"{a['pct_energy']:.4f}", "%"])
-    wr.writerow(["A", "per_cycle_active", "", "", f"{a['per_cycle_nj']:.7f}", "nJ/cycle"])
+        wr.writerow(["active-ml", "cycles", label, "", rec["cycles"], "cycles"])
+        wr.writerow(["active-ml", "cpu_energy", label, "", f"{rec['cpu_nj']:.6f}", "nJ"])
+    wr.writerow(["active-ml", "delta_cycles", "optimized-naive", "", a["delta_cycles"], "cycles"])
+    wr.writerow(["active-ml", "delta_energy", "optimized-naive", "", f"{a['delta_nj']:.6f}", "nJ"])
+    wr.writerow(["active-ml", "delta_pct", "optimized-naive", "", f"{a['pct_energy']:.4f}", "%"])
+    wr.writerow(["active-ml", "per_cycle_active", "", "", f"{a['per_cycle_nj']:.7f}", "nJ/cycle"])
     for r in b:
         pre = r["prescaler"]
         for key, unit in (("active_nj", "nJ"), ("powersave_nj", "nJ"),
                           ("sleep_saved_nj", "nJ"), ("sleep_saving_pct", "%"),
                           ("compiler_delta_nj", "nJ"), ("compiler_delta_active_nj", "nJ")):
-            wr.writerow(["B", key, "optimized", pre, f"{r[key]:.6f}", unit])
+            wr.writerow(["periodic-ml", key, "optimized", pre, f"{r[key]:.6f}", unit])
     if d is not None:
         o.write(render_dsp_csv(d).split("\n", 1)[1])
     if bd is not None:
         for r in bd["rows"]:
             if r["idle_cycles"] < 0:
-                wr.writerow(["B-DSP", "overrun_cycles", r["status"], r["prescaler"], -r["idle_cycles"], "cycles"])
+                wr.writerow(["periodic-dsp", "overrun_cycles", r["status"], r["prescaler"], -r["idle_cycles"], "cycles"])
             else:
-                wr.writerow(["B-DSP", "idle_cycles", r["status"], r["prescaler"], r["idle_cycles"], "cycles"])
+                wr.writerow(["periodic-dsp", "idle_cycles", r["status"], r["prescaler"], r["idle_cycles"], "cycles"])
             for key, unit in (("period_cycles", "cycles"), ("compute_cycles", "cycles"),
                               ("active_nj", "nJ"), ("powersave_nj", "nJ"), ("saved_nj", "nJ"), ("saving_pct", "%")):
                 if key == "idle_cycles":
                     continue
                 if key in r:
                     value = r[key] if isinstance(r[key], int) else f"{r[key]:.6f}"
-                    wr.writerow(["B-DSP", key, r["status"], r["prescaler"], value, unit])
+                    wr.writerow(["periodic-dsp", key, r["status"], r["prescaler"], value, unit])
     return o.getvalue()
 
 
@@ -503,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-dir", type=Path, help="write results.md and results.csv here")
     args = ap.parse_args(argv)
     try:
-        a, b, d, bd = phase_a(), phase_b(), dsp(), phase_b_dsp()
+        a, b, d, bd = active_ml(), periodic_ml(), dsp(), periodic_dsp()
     except MissingArtifact as error:
         print(f"report_results: {error}", file=sys.stderr)
         return 2
