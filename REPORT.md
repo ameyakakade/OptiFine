@@ -319,8 +319,8 @@ instructions and a `break`) reports 8 cycles and 22.7001 nJ: the final
 cancels the one-time initialization cost (stack/Timer0/ISR setup) and
 isolates the per-period marginal cost, including the fact that the busy-wait
 and Power-save variants have different fixed wrapper lengths (in the raw
-counts, prescaler-32 count-4 totals 39,011 busy-wait cycles against 40,006
-for Power-save, a 995-cycle wrapper-length difference the differential
+counts, the naive build's prescaler-32 count-4 run totals 39,011 busy-wait
+cycles against 40,006 for Power-save, a 995-cycle wrapper-length difference the differential
 method makes non-confounding; `sim/tests/test_compare_periodic.py` locks this
 in).
 
@@ -552,13 +552,14 @@ not nest, and nothing calls).
 ### Toolchain independence
 
 The published evidence was captured on Linux with avr-gcc 16.1.0 and
-Temurin JDK 8u504-b01. The project's original experiments ran on Windows
-with avr-gcc 15.2.0 and Zulu JDK 8u492; only `avrora.jar` was the same file
-(SHA-256 `016021f4...eb`). Every cycle count and every energy figure of
-every run -- the two active-mode builds, the DSP program, all 32 ML periodic
-runs and all 16 DSP periodic runs -- is identical between the two, to the
-last digit Avrora prints. The results are properties of the emitted programs
-and Avrora's power model, not of one machine's toolchain; they are still not
+Temurin JDK 8u504-b01. The project's original ML runs -- the two active-mode
+builds, the calibration program and all 32 periodic-scheduling runs -- were
+made on Windows with avr-gcc 15.2.0 and Zulu JDK 8u492; only `avrora.jar`
+was the same file (SHA-256 `016021f4...eb`). Every cycle count and energy
+figure in those reports is identical between the two, to the last digit
+Avrora prints, as are the DSP program's and DSP sweep's reports against their
+earlier captures. The results are properties of the emitted programs and
+Avrora's power model, not of one machine's toolchain; they are still not
 hardware measurements (see Limitations).
 
 ## Reproducibility

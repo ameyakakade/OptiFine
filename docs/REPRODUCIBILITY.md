@@ -128,7 +128,7 @@ bash sim/run_avrora.sh build/dsp.s                # Simulated time: 148335 cycle
 ## What reproduces, and what does not
 
 Given the same compiler sources, inputs and `avrora.jar`, the emitted assembly
-and Avrora's cycle and energy reports are deterministic: the retained evidence
-was recaptured on a different operating system, assembler and JDK build than
-the project's original runs, and every figure was identical. What no script
+and Avrora's cycle and energy reports are deterministic: the ML evidence was
+recaptured on a different operating system, assembler and JDK build than the
+project's original ML runs, and every figure was identical. What no script
 here can reproduce is a physical measurement; there is none.

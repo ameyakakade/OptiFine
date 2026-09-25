@@ -44,7 +44,9 @@ is the **naive baseline**: every value is stored to its SRAM slot and reloaded
 on each use.
 
 - **SRAM layout** (`sram_layout.c`): one contiguous slot per op tensor from
-  `0x0200` upwards; the DSP path adds a scratch arena after the tensors.
+  `0x0200` upwards, then the 181-byte DSP scratch arena (reserved in every
+  layout, though only DSP ops use it), then, in periodic programs, the four
+  scheduler bytes.
 - **Register roles** (`codegen/registers.h`): r0/r1 multiply result, r2 a
   permanent zero, r3-r8 Requantize's 48-bit product, r16/r17 MAC operands,
   r18-r21 the 32-bit accumulator, r22-r25 scratch.
