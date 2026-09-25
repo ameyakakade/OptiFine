@@ -1,0 +1,3 @@
+prologue (const/input load): 673 cycles, 1909.637 nJ (predicted)
+inference body: 5344 cycles, 15163.600 nJ (predicted)
+total: 6017 cycles, 17073.238 nJ (predicted; compare against a real sim/run_avrora.sh run for the actual simulated numbers)

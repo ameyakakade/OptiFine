@@ -1,0 +1,7 @@
+dsp.elf  :
+section    size      addr
+.data       0   8388864
+.text   12800         0
+Total   12800
+
+

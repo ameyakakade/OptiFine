@@ -1,0 +1,22 @@
+[1;34mAvrora [1;00m[[1;34mBeta 1.7.115[1;00m] - (c) 2003-2007 UCLA Compilers Group
+
+[0;33mLoading sim/fixtures/periodic_ml/p8_naive_powersave_n5.elf[1;00m...[0;32mOK[1;00m
+=={ Simulation events }=======================================================
+[0;32mNode          Time   Event[1;00m
+------------------------------------------------------------------------------
+==============================================================================
+[0;32mSimulated time[1;00m: [1;36m9375[1;00m cycles
+=={ Energy consumption results for node 0 }===================================
+Node lifetime: 9375 cycles,  0.001171875 seconds
+
+CPU: 1.8136197562499997E-5 Joule
+   Active: 1.7995504275E-5 Joule, 6342 cycles
+   Idle: 0.0 Joule, 0 cycles
+   ADC Noise Reduction: 0.0 Joule, 0 cycles
+   Power Down: 0.0 Joule, 0 cycles
+   Power Save: 1.4069328749999999E-7 Joule, 3033 cycles
+   RESERVED 1: 0.0 Joule, 0 cycles
+   RESERVED 2: 0.0 Joule, 0 cycles
+   Standby: 0.0 Joule, 0 cycles
+   Extended Standby: 0.0 Joule, 0 cycles
+

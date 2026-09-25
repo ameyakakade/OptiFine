@@ -1,0 +1,86 @@
+{
+  "artifacts": {
+    "naive.avrora.txt": "354d1716ea67e9e098d87358d6d4a77fc8d84d897bf23563f5331efbaeb2ec6d",
+    "naive.compile.txt": "7dbb522e5ec71fc629b1194620bf0b78c2767f49758924703d2a6c932cc25c3f",
+    "naive.s": "d66c85a15b526ca3a43b29e7324ac0a07710b89682d50ac53e490a0c0891a3c9",
+    "optimized.avrora.txt": "3813f715ed18a9818b4e317359171d0a1e8b50d05286dfad1b5d621381f5fd83",
+    "optimized.compile.txt": "58782d674b3679d49701c146939db93bde0dc575764af653b1399d4da0bcf39e",
+    "optimized.s": "2d60e2b6a160f84c54ca4ff624e2dda1bb2acfa0957af082d23a1b7bf7950f1a",
+    "smoke.avrora.txt": "a8facbae5639c5f298ab71e3e61012044ce89951d0edf93319f5fc5cc5371350",
+    "smoke.s": "2c985d6c3bee96ff6c6e95afc65d8a7d044f8410b071fb63e7c005be108dce91"
+  },
+  "commands": {
+    "compile_naive": [
+      "compiler/build/optifine",
+      "models/tiny_classifier.onnx",
+      "--cost-table",
+      "cost_table.toml",
+      "--input",
+      "models/tiny_classifier_golden_input.txt",
+      "--out",
+      "sim/fixtures/active_ml/naive.s"
+    ],
+    "compile_optimized": [
+      "compiler/build/optifine",
+      "models/tiny_classifier.onnx",
+      "--cost-table",
+      "cost_table.toml",
+      "--input",
+      "models/tiny_classifier_golden_input.txt",
+      "--optimized",
+      "--out",
+      "sim/fixtures/active_ml/optimized.s"
+    ],
+    "simulate_naive": [
+      "bash",
+      "sim/run_avrora.sh",
+      "sim/fixtures/active_ml/naive.s"
+    ],
+    "simulate_optimized": [
+      "bash",
+      "sim/run_avrora.sh",
+      "sim/fixtures/active_ml/optimized.s"
+    ],
+    "simulate_smoke": [
+      "bash",
+      "sim/run_avrora.sh",
+      "sim/fixtures/active_ml/smoke.s"
+    ]
+  },
+  "cycles": {
+    "naive": 6130,
+    "optimized": 6018,
+    "smoke": 8
+  },
+  "evidence_limit": "Avrora-model simulation of ATmega128 at 8 MHz; no physical hardware measurement.",
+  "generated_at": "2026-09-26T01:17:05+00:00",
+  "git": {
+    "commit": "0aace63cea59378e90eac4e61c1d38d83f845bdd",
+    "source_dirty": false
+  },
+  "inputs": {
+    "cost_table": {
+      "path": "cost_table.toml",
+      "sha256": "45141d4d0d5f5432f6fbb097c2cef93cdec8fe6ab92fcae49cbce655bf7980d5"
+    },
+    "input": {
+      "path": "models/tiny_classifier_golden_input.txt",
+      "sha256": "fd90b1cbc8a693571bc20cda54d45f174f89f8774ec6133f7146db13a0dbfd2b"
+    },
+    "model": {
+      "path": "models/tiny_classifier.onnx",
+      "sha256": "a596005579c51aac0a622283948f088eb6dfcc046627fb091463f987644b8c31"
+    },
+    "smoke": {
+      "path": "sim/smoke.s",
+      "sha256": "2c985d6c3bee96ff6c6e95afc65d8a7d044f8410b071fb63e7c005be108dce91"
+    }
+  },
+  "schema": "active-ml-baseline-v1",
+  "tools": {
+    "avr_gcc": "avr-gcc (GCC) 16.1.0",
+    "avrora_jar_sha256": "016021f49d922e73df4d295c05d11fb6aeabdce11974581caadf65387eb1e3eb",
+    "compiler_sha256": "062c124821390ff880bc6fc75461b647aa1341ad5be77d508c98df2a0790e691",
+    "java": "openjdk version \"1.8.0_504\""
+  }
+}

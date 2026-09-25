@@ -1,0 +1,22 @@
+[1;34mAvrora [1;00m[[1;34mBeta 1.7.115[1;00m] - (c) 2003-2007 UCLA Compilers Group
+
+[0;33mLoading sim/fixtures/periodic_dsp/p128_dsp_powersave.elf[1;00m...[0;32mOK[1;00m
+=={ Simulation events }=======================================================
+[0;32mNode          Time   Event[1;00m
+------------------------------------------------------------------------------
+==============================================================================
+[0;32mSimulated time[1;00m: [1;36m182379[1;00m cycles
+=={ Energy consumption results for node 0 }===================================
+Node lifetime: 182379 cycles,  0.022797374999999998 seconds
+
+CPU: 4.2329385011249997E-4 Joule
+   Active: 4.21728132825E-4 Joule, 148626 cycles
+   Idle: 0.0 Joule, 0 cycles
+   ADC Noise Reduction: 0.0 Joule, 0 cycles
+   Power Down: 0.0 Joule, 0 cycles
+   Power Save: 1.5657172875E-6 Joule, 33753 cycles
+   RESERVED 1: 0.0 Joule, 0 cycles
+   RESERVED 2: 0.0 Joule, 0 cycles
+   Standby: 0.0 Joule, 0 cycles
+   Extended Standby: 0.0 Joule, 0 cycles
+

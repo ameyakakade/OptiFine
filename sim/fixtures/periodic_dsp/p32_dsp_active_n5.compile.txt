@@ -1,0 +1,5 @@
+periodic policy: active
+periodic timer prescaler: 32 (Timer0 divisor)
+periodic inference count: 5
+periodic initialization predicted cost: 769 cycles, 2182.037 nJ
+periodic per-inference predicted compute cost: 147565 cycles, 418715.687 nJ
