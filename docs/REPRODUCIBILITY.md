@@ -36,9 +36,11 @@ ctest --test-dir compiler/build      # compiler, interpreter, pipeline and CLI t
 python3 -m pytest sim/tests          # evidence checks and result-generation tests
 ```
 
-Neither suite starts Avrora. The Python tests revalidate the retained evidence
-(hashes, re-derived tables and the canonical figures) and tamper-test the
-checks.
+Neither suite starts Avrora. `sim/tests/test_evidence_*.py` revalidate the
+retained evidence (hashes, re-derived tables and the canonical figures) and
+tamper-test those checks; the other Python tests exercise the tooling on
+inputs they build themselves. `.github/workflows/ci.yml` runs the same build
+and both suites.
 
 ## Retained evidence
 

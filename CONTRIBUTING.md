@@ -12,7 +12,8 @@ ctest --test-dir compiler/build
 python3 -m pytest sim/tests
 ```
 
-Simulation needs the AVR toolchain, JDK 8 and Avrora; see
+The CI workflow (`.github/workflows/ci.yml`) runs the same commands; neither
+suite starts Avrora. Simulation needs the AVR toolchain, JDK 8 and Avrora; see
 [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) (`tools/setup_linux.sh`
 fetches the last two on Linux).
 
