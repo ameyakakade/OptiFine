@@ -40,9 +40,10 @@ fetches the last two on Linux).
 ## Commits
 
 - One logical change per commit; stage deliberately rather than `git add .`.
-- Message format: `[Area]- Imperative summary`, no trailing period, about 72
-  characters at most, with an optional body explaining why. For example
-  `[Compiler]- Price the closing branch of long counted loops`.
+- Message format: exactly one line, `[Area]: Imperative summary`, with no
+  body, no trailers and no trailing period, about 72 characters at most. For
+  example `[Compiler]: Price the closing branch of long counted loops`.
+- Sign every commit.
 - Areas: `[Compiler]` (`compiler/`), `[Sim]` (`sim/`), `[Export]` (`export/`,
   `models/`), `[Cost]` (`cost_table.toml`, `SOURCES.md`), `[Build]` (CMake,
   toolchain setup, repository configuration), `[Test]` (test-only changes),
