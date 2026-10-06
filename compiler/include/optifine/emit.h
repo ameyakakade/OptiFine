@@ -13,7 +13,7 @@
  * twice is refused rather than left for the assembler to reject. Numbering
  * depends only on emission order, so the output is deterministic. A program
  * with a single labelled candidate keeps that candidate's label text as-is. */
-#define EMIT_UNIT_MAX_GLOBALS 16
+#define EMIT_UNIT_MAX_GLOBALS 256
 typedef struct {
     unsigned next_local;
     char globals[EMIT_UNIT_MAX_GLOBALS][AVR_OPERAND_LEN];

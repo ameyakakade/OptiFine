@@ -101,8 +101,6 @@ _Static_assert(BF_SCRATCH_BYTES <= DSP_SCRATCH_FFT_OUTER_COUNT,
 _Static_assert(DSP_SCRATCH_FFT_OUTER_COUNT < DSP_SCRATCH_BYTES,
                "FFT block counter must lie inside the reserved DSP scratch region");
 
-#define DSP_TWIDDLE_LABEL ".Ltw"
-#define DSP_TWIDDLE_ENTRIES 32
 
 /* Host-side canonical twiddle, Q15. Shared with the table emitter and with
  * the tests' oracle so both cannot drift. */

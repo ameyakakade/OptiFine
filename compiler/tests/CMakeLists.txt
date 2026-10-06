@@ -28,6 +28,9 @@ endfunction()
 optifine_add_test(test_ir)
 optifine_add_test(test_mir)
 optifine_add_test(test_avr_mir ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
+optifine_add_test(test_hir_to_mir ARGS
+    ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx
+    ${OPTIFINE_REPO_ROOT}/cost_table.toml)
 optifine_add_test(test_pb_reader)
 optifine_add_test(test_cost_model ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml ${CMAKE_CURRENT_BINARY_DIR})
 optifine_add_test(test_ingest ARGS ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx)

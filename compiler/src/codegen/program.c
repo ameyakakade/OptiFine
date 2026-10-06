@@ -2,56 +2,50 @@
 
 #include <stdlib.h>
 
-#include "optifine/codegen/candidates.h"
-#include "optifine/codegen/lower.h"
-#include "optifine/codegen/select.h"
+#include "optifine/codegen/avr_mir.h"
+#include "optifine/codegen/hir_to_mir.h"
+#include "optifine/codegen/instr_buf.h"
 #include "optifine/emit.h"
 
-/* Picks the cheapest of `candidates[0..count)` via select_min_energy,
- * emits it, and frees every candidate exactly once (the winner is a shallow copy sharing its `instructions` pointer
- * with the original `candidates[]` slot select_min_energy pointed at, so
- * that slot must NOT also be freed separately). */
-static int emit_best(Candidate *candidates, size_t count, EmitUnit *unit, FILE *out,
-                     double *energy_acc, uint32_t *cycles_acc) {
-    const Candidate *best = select_min_energy(candidates, count);
-    Candidate mutable_best = *best;
+/* Every program region goes the same way: workload HIR -> MIR (hir_to_mir)
+ * -> AVR selection (avr_mir) -> emission. Each region builds only the MIR
+ * function it emits, so a kernel is lowered once per program. */
 
-    int rc = emit_candidate(unit, &mutable_best, out);
-    *energy_acc += mutable_best.energy_nj;
-    *cycles_acc += mutable_best.cycles;
-
-    for (size_t i = 0; i < count; i++) {
-        if (&candidates[i] != best) {
-            candidate_free(&candidates[i]);
-        }
-    }
-    candidate_free(&mutable_best);
+/* Emits a candidate into the unit and adds its cost to `cost`. */
+static int emit_priced(EmitUnit *unit, const Candidate *c, FILE *out, ProgramRegionCost *cost) {
+    int rc = emit_candidate(unit, c, out);
+    cost->energy_nj += c->energy_nj;
+    cost->cycles += c->cycles;
     return rc;
 }
 
-#define PROGRAM_MAX_CANDIDATES 4
-
-static int lower_one(const IrGraph *graph, size_t op_id, const SramLayout *layout,
-                      const ReuseAnalysis *reuse, const CostModel *cost_model,
-                      const int8_t *demo_input, size_t demo_input_len,
-                      int use_real_candidates, EmitUnit *unit, FILE *out,
-                      double *energy_acc, uint32_t *cycles_acc) {
-    if (!use_real_candidates) {
-        Candidate c;
-        if (lower_op(graph, op_id, layout, reuse, cost_model, demo_input, demo_input_len, &c) != 0) {
-            return -1;
-        }
-        return emit_best(&c, 1, unit, out, energy_acc, cycles_acc);
-    }
-
-    Candidate candidates[PROGRAM_MAX_CANDIDATES];
-    size_t count = candidates_generate(graph, op_id, layout, reuse, cost_model,
-                                        demo_input, demo_input_len,
-                                        candidates, PROGRAM_MAX_CANDIDATES);
-    if (count == 0) {
+/* Builds the workload module with `which` function, lays it out, and
+ * selects that function. */
+static int select_region(const IrGraph *graph, const SramLayout *layout, const ReuseAnalysis *reuse,
+                         const CostModel *cost_model, const int8_t *input, size_t input_len,
+                         int use_real_candidates, unsigned which, AvrMirCode *code) {
+    WorkloadMir mir;
+    if (hir_to_mir(graph, layout, reuse, cost_model, input, input_len, use_real_candidates, which, &mir) != 0) {
         return -1;
     }
-    return emit_best(candidates, count, unit, out, energy_acc, cycles_acc);
+    AvrMirLayout avr;
+    int rc = workload_mir_layout(&mir, layout, &avr);
+    if (rc == 0) {
+        uint32_t fn = which == HIR_TO_MIR_INITIALIZE ? mir.initialize : mir.infer;
+        /* The initialization region is where a program starts, so it carries
+         * the backend's entry prologue (clr r2). */
+        rc = avr_mir_select_function(&mir.module, &avr, fn, which == HIR_TO_MIR_INITIALIZE, cost_model, code);
+        avr_mir_layout_free(&avr);
+    }
+    workload_mir_free(&mir);
+    return rc;
+}
+
+static int emit_region(const AvrMirCode *code, EmitUnit *unit, FILE *out, ProgramRegionCost *cost) {
+    for (size_t i = 0; i < code->count; i++) {
+        if (emit_priced(unit, &code->segments[i].code, out, cost) != 0) return -1;
+    }
+    return 0;
 }
 
 int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
@@ -61,27 +55,15 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
     out_cost->energy_nj = 0.0;
     out_cost->cycles = 0;
-
-    Candidate zero_init;
-    if (lower_init_zero_reg(cost_model, &zero_init) != 0) {
+    AvrMirCode code;
+    if (select_region(graph, layout, reuse, cost_model, demo_input, demo_input_len, use_real_candidates,
+                      HIR_TO_MIR_INITIALIZE, &code) != 0) {
+        fprintf(stderr, "codegen_emit_initialization: failed to lower the initialization region\n");
         return -1;
     }
-    if (emit_best(&zero_init, 1, unit, out, &out_cost->energy_nj, &out_cost->cycles) != 0) {
-        return -1;
-    }
-
-    for (size_t i = 0; i < graph->count; i++) {
-        int is_prologue = (graph->ops[i].kind == OP_INPUT || graph->ops[i].kind == OP_CONST);
-        if (is_prologue) {
-            if (lower_one(graph, i, layout, reuse, cost_model, demo_input, demo_input_len,
-                          use_real_candidates, unit, out,
-                          &out_cost->energy_nj, &out_cost->cycles) != 0) {
-                fprintf(stderr, "codegen_emit_initialization: failed to lower op %zu\n", i);
-                return -1;
-            }
-        }
-    }
-    return 0;
+    int rc = emit_region(&code, unit, out, out_cost);
+    avr_mir_code_free(&code);
+    return rc;
 }
 
 int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
@@ -91,25 +73,18 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
     out_cost->energy_nj = 0.0;
     out_cost->cycles = 0;
-
-    int boundary_written = 0;
-    for (size_t i = 0; i < graph->count; i++) {
-        int is_prologue = (graph->ops[i].kind == OP_INPUT || graph->ops[i].kind == OP_CONST);
-        if (!is_prologue) {
-            if (!boundary_written) {
-                fprintf(out, "\n    ; ---- inference begins here ----\n");
-                boundary_written = 1;
-            }
-            if (lower_one(graph, i, layout, reuse, cost_model, demo_input, demo_input_len,
-                          use_real_candidates, unit, out,
-                          &out_cost->energy_nj, &out_cost->cycles) != 0) {
-                fprintf(stderr, "codegen_emit_inference_body: failed to lower op %zu\n", i);
-                return -1;
-            }
-        }
+    AvrMirCode code;
+    if (select_region(graph, layout, reuse, cost_model, demo_input, demo_input_len, use_real_candidates,
+                      HIR_TO_MIR_INFER, &code) != 0) {
+        fprintf(stderr, "codegen_emit_inference_body: failed to lower the inference body\n");
+        return -1;
     }
-
-    return 0;
+    if (code.count > 0) {
+        fprintf(out, "\n    ; ---- inference begins here ----\n");
+    }
+    int rc = emit_region(&code, unit, out, out_cost);
+    avr_mir_code_free(&code);
+    return rc;
 }
 
 int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
@@ -148,10 +123,21 @@ int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
     return 0;
 }
 
+/* The module's program-memory constants (the DSP twiddle table) as one
+ * candidate; empty when there are none. */
+static int constant_data(const IrGraph *graph, const CostModel *cost_model, Candidate *out) {
+    /* Objects only: no function is built, so no layout or input is read. */
+    WorkloadMir mir;
+    if (hir_to_mir(graph, NULL, NULL, cost_model, NULL, 0, 0, 0, &mir) != 0) return -1;
+    int rc = avr_mir_select_constants(&mir.module, cost_model, out);
+    workload_mir_free(&mir);
+    return rc;
+}
+
 int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model,
                                EmitUnit *unit, FILE *out) {
     Candidate data;
-    if (lower_dsp_constant_data(graph, cost_model, &data) != 0) {
+    if (constant_data(graph, cost_model, &data) != 0) {
         return -1;
     }
     int rc = 0;
@@ -183,10 +169,24 @@ int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
                                     &unit, out, &out_cost->body) != 0) {
         return -1;
     }
-    Candidate end;
-    if (lower_dsp_program_end(graph, cost_model, &end) != 0) {
+
+    /* The terminating break, priced (it is part of what Avrora counts), then
+     * the constant data, which control flow never reaches. */
+    InstrBuf end;
+    instrbuf_init(&end);
+    ins0(&end, "break");
+    Candidate brk, data;
+    if (instrbuf_price(&end, cost_model, &brk) != 0) {
+        return -1;
+    }
+    if (constant_data(graph, cost_model, &data) != 0) {
+        candidate_free(&brk);
         return -1;
     }
     fprintf(out, "\n    ; ---- program end: break, then constant data ----\n");
-    return emit_best(&end, 1, &unit, out, &out_cost->termination.energy_nj, &out_cost->termination.cycles);
+    int rc = emit_priced(&unit, &brk, out, &out_cost->termination);
+    if (rc == 0) rc = emit_candidate(&unit, &data, out);
+    candidate_free(&brk);
+    candidate_free(&data);
+    return rc;
 }

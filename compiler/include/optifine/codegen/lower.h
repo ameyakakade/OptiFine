@@ -62,6 +62,11 @@ int lower_op(const IrGraph *graph, size_t op_id,
 int lower_fixed_mul_q15_test_hook(uint16_t a_addr, uint16_t b_addr, uint16_t out_addr,
                                    const CostModel *cost_model, Candidate *out);
 
+/* The FFT's canonical twiddle table: DSP_TWIDDLE_ENTRIES (W^k, k < N/2)
+ * Q15 real/imaginary pairs in program memory under DSP_TWIDDLE_LABEL. */
+#define DSP_TWIDDLE_LABEL ".Ltw"
+#define DSP_TWIDDLE_ENTRIES 32
+
 /* Canonical Q15 twiddle, shared by the table emitter and the tests' oracle. */
 void dsp_twiddle_q15(int k, int16_t *wr, int16_t *wi);
 /* Emits the 32-entry canonical twiddle table as program-memory data. Must be
@@ -72,19 +77,14 @@ int lower_fft_stage0_test_hook(const IrGraph *graph, size_t op_id,
                                 const SramLayout *layout, const CostModel *cost_model,
                                 Candidate *out);
 
-/* The end of a DSP program: the terminating `break`, priced like any other
- * instruction (1 cycle), then -- only if the graph has FFT stages -- the one
- * canonical twiddle table they read through lpm. The table must follow the
+/* Test seam: the end of a DSP program as one candidate -- the terminating
+ * `break`, priced like any other instruction (1 cycle), then, only if the
+ * graph has FFT stages, the canonical twiddle table they read through lpm.
+ * Real programs get the same two pieces from codegen_emit_dsp_program (the
+ * break) and the MIR backend's constant data (the table). The table must follow the
  * break so control flow can never reach it, and must be emitted exactly once
  * per assembly unit (EmitUnit refuses a second .Ltw). */
 int lower_dsp_program_end(const IrGraph *graph, const CostModel *cost_model, Candidate *out);
-
-/* Just the program-memory constant data lower_dsp_program_end places after its
- * break -- the twiddle table if the graph has FFT stages, otherwise an empty
- * candidate -- for a program whose terminating code is written elsewhere (the
- * periodic scheduling wrapper). The caller must place it where control flow
- * cannot reach it. */
-int lower_dsp_constant_data(const IrGraph *graph, const CostModel *cost_model, Candidate *out);
 
 /* FFT stages first_stage..last_stage (0-based, inclusive) followed by break
  * and the twiddle table, as one self-contained program. */

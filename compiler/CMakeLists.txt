@@ -54,6 +54,7 @@ add_library(optifine_core STATIC
     src/codegen/candidates.c
     src/codegen/cost_category.c
     src/codegen/dsp32.c
+    src/codegen/hir_to_mir.c
     src/codegen/instr_buf.c
     src/codegen/lower.c
     src/codegen/lower_dsp.c
