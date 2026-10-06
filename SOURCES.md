@@ -103,6 +103,15 @@ independently-generated programs (`sim/smoke.s`: 22.7001 nJ / 8 cycles
   - COMPLEX_ADD: not a single opcode -- a complex add is two real adds
     (re+re, im+im), i.e. 2x ADD = 2 cycles.
 
+The compiler's cycle model is a separate per-opcode table from the same
+manual, `kAvrCycles` in `compiler/src/codegen/cost_category.c`, covering
+every opcode the compiler emits (conditional branches at their taken cost;
+the loop pricing corrects each loop's one fall-through). Cycle counts come
+only from that table and energy only from `cost_table.toml` (plus the
+per-cycle constant for `lpm`, `rjmp` and `break`, which no table category
+expresses); `test_pricing` checks the two agree under the current table and
+that cycle counts do not move when energies do.
+
 ## Table
 
 | Instruction | Cycles | Energy (nJ) | Source |

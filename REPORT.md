@@ -45,7 +45,7 @@ processor never leaves Active mode — and fails the moment it does.
 
 The project does not dispute their measurement. Its active-mode
 optimization corroborates it: an energy-cost model driving instruction
-selection and next-use register allocation reduces exactly to cycles times a
+selection and next-use register caching reduces exactly to cycles times a
 constant, and its 1.83% simulated saving is a pure cycle reduction — the
 only lever their regime predicts is available. The divergence appears with
 periodic power-aware scheduling, where the compiler itself schedules
@@ -74,35 +74,42 @@ positioning is in `docs/LITERATURE_SURVEY.md`.
 
 ```
 ONNX classifier --(ingest.c)----\
-                                 >-- typed IR --> lowering / candidates --> selection --> AVR assembly --> avr-gcc --> Avrora
+                                 >-- workload graph --> verify --> MIR --> AVR selection --> AVR assembly --> avr-gcc --> Avrora
 DSP pipeline ---(dsp_build.c)---/
 ```
 
 The ML path ingests a hand-authored quantized ONNX graph
 (`export/export_model.py`) through a hand-rolled protobuf parser
 (`compiler/src/ingest.c`); the DSP path constructs its fixed graph directly
-(`compiler/src/dsp_build.c`). Both share one typed IR, one lowering
-(`compiler/src/codegen/lower.c`), candidate generation and cost-based
-selection (`candidates.c`, `select.c`, minimizing predicted energy), and
-emission (`emit.c`, `program.c`, and `periodic.c` for the periodic wrapper).
+(`compiler/src/dsp_build.c`). Both share one typed workload graph, checked by
+`ir_verify` before code generation; one set of per-operator kernel lowerings
+(`compiler/src/codegen/lower*.c`) with candidate generation and cost-based
+selection (`candidates.c`, `select.c`, minimizing predicted energy); a
+translation into a generic control-flow MIR (`hir_to_mir.c`) and AVR
+selection from it (`avr_mir.c`); and emission (`emit.c`, `program.c`, and
+`periodic.c` for the periodic wrapper).
 The emitted assembly is assembled by `avr-gcc` and simulated by Avrora Beta
 1.7.115 (`sim/run_avrora.sh`, `-monitors=energy`, ATmega128). The component
 design is described in `docs/ARCHITECTURE.md`.
 
 ## Compiler Backend
 
-**Pricing.** Every emitted instruction is priced from `cost_table.toml` as
-`cycles x 2.8375 nJ` (see "Experimental Methodology" for why a single
-constant). Pricing is per executed instruction: straight-line code once, code
+**Pricing.** Every emitted instruction's cycles come from an AVR timing
+table (AVR Instruction Set Manual) and its energy from `cost_table.toml`,
+where every entry is `cycles x 2.8375 nJ` (see "Experimental Methodology"
+for why a single constant); the two are accumulated separately. Pricing is
+per executed instruction: straight-line code once, code
 inside a statically bounded counted loop times the product of its enclosing
 trip counts, including the closing branch's one fall-through. The trip counts
 are compile-time constants and no data-dependent branch is emitted, so the
 predicted cycle count is exact; for every retained program it equals
-Avrora's.
+Avrora's. (The ML programs' printed totals leave out their final `break`,
+which the program epilogue writes unpriced, so Avrora counts one cycle more
+there: 6,130 against 6,129. The DSP program prices its `break`.)
 
-**Registers.** Candidate generation and register allocation are
-deliberately scoped, not a fully general "any value in any of AVR's 32
-registers across any op boundary" allocator. AVR's register file is
+**Registers.** There is no general register allocator: no value stays in a
+register across an op boundary, and register caching is deliberately scoped
+to one pattern (see "Active-Mode Optimization"). AVR's register file is
 committed as follows for the per-op arithmetic (see
 `compiler/include/optifine/codegen/registers.h`):
 
@@ -133,8 +140,8 @@ computes a different answer is a failed test.
 
 The naive baseline lowers each op once and reloads every value from SRAM on
 each use. With `--optimized`, the compiler generates alternative candidates
-and keeps the cheapest. `regalloc_next_use`
-(`compiler/src/codegen/regalloc.c`) performs next-use analysis: it marks a
+and keeps the cheapest. A next-use reuse analysis, `reuse_analyze`
+(`compiler/src/codegen/reuse_analysis.c`), marks a
 value as worth caching when it is a MatMul's activation input, which is read
 once per output channel (a bounded-distance reuse pattern), and leaves every
 other op's output alone, since every other op in these graphs consumes its
@@ -490,8 +497,9 @@ Magnitude are 84% of the cycles; Window, still fully unrolled, is 36% of the
 flash.
 
 SRAM is 2,336 B of graph tensors (one buffer per op, none reused) plus a
-181-byte scratch arena. The arena is an overlay across op lifetimes, so the
-most any op holds at once is 64 B (PeakExtract's `selected[]`); per-op
+181-byte scratch arena. The arena is an overlay across op lifetimes: its
+181-byte extent comes from the FFT's block counter at offset 180, while the
+most any single op touches is 64 B (PeakExtract's `selected[]`); per-op
 scratch is not additive. The program uses no stack (its periodic build uses
 4 B, for the timer interrupt).
 
@@ -597,8 +605,9 @@ lists the commands and tool versions.
   `frexp`). The int32 accumulator only uses ~19 bits of magnitude for these
   layer shapes, so a 16-bit multiplier's precision already exceeds what the
   int8 output can represent.
-- **Register allocation is scoped to MatMul's activation input**, not a
-  general cross-op allocator (see "Active-Mode Optimization").
+- **No general register allocator.** Register caching covers MatMul's
+  activation input only (see "Active-Mode Optimization"); values do not stay
+  in registers across ops.
 - **Weight constants load via synthesized `ldi`+`sts`**, not flash-resident
   `.rodata` + `lpm`: programs are assembled with `-nostartfiles`, so there is
   no crt0 to copy an initialized `.data` section into SRAM.
@@ -647,7 +656,7 @@ lists the commands and tool versions.
 
 OptiFine compiles two structurally different workloads for the ATmega128
 with an exact cycle model: every retained program's predicted cycle count
-equals Avrora's. Within Active mode, energy-aware code selection is cycle
+equals Avrora's (the ML programs' one unpriced `break` aside). Within Active mode, energy-aware code selection is cycle
 minimization -- the classifier's 1.83% saving is exactly its 112 cycles.
 Once the compiler also schedules sleep, energy and latency separate: idle
 time costs 61 times less, the saving follows the duty cycle (96.33% for the

@@ -8,7 +8,7 @@ This page lists the commands, from a fresh clone.
 
 | Tool | Version used for the retained evidence | Needed for |
 |---|---|---|
-| CMake, C11 compiler (gcc/clang) | CMake >= 3.16 (4.4 used) | building the compiler and its tests |
+| CMake, C11 compiler (gcc/clang) | CMake >= 3.16 (4.4 used); the tree builds as strict ISO C11 | building the compiler and its tests |
 | Python | 3.9+ (3.13 used), with `pytest` | result generation, reproduction scripts and their tests |
 | AVR toolchain | avr-gcc 16.1.0, avr-binutils, avr-libc | assembling emitted programs |
 | JDK | Temurin 8u504-b01 | running Avrora (Avrora 1.7.115 fails on JDK 9+) |
@@ -39,8 +39,11 @@ python3 -m pytest sim/tests          # evidence checks and result-generation tes
 Neither suite starts Avrora. `sim/tests/test_evidence_*.py` revalidate the
 retained evidence (hashes, re-derived tables and the canonical figures) and
 tamper-test those checks; the other Python tests exercise the tooling on
-inputs they build themselves. `.github/workflows/ci.yml` runs the same build
-and both suites.
+inputs they build themselves. `.github/workflows/ci.yml` runs the build with
+GCC and Clang (warnings as errors), under AddressSanitizer and
+UndefinedBehaviorSanitizer, and as a Release build; runs both suites; and
+regenerates the retained ML and DSP programs and compares them byte for byte
+with `sim/fixtures/`.
 
 ## Retained evidence
 
@@ -63,6 +66,14 @@ Each directory holds the generated assembly, the raw tool output and a
   output, the `avrora.jar` SHA-256,
 - the evidence limit: Avrora-model simulation, no hardware measurement, and no
   simulated SRAM read back.
+
+The retained captures ran from commit `0aace63`. A later compiler change that
+leaves every generated program byte-identical does not invalidate them. CI
+checks this for the naive, optimized and DSP programs on every change, and
+all 51 retained programs (those three plus the 48 periodic ones) were checked
+against the restructured compiler that introduced the MIR backend. A fresh
+capture still records a different compiler-binary hash. A change that alters a
+generated program needs the affected evidence recaptured, not edited.
 
 ## Verify the retained evidence (no tool runs)
 

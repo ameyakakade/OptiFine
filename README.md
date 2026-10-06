@@ -2,6 +2,9 @@
 
 **Energy-Aware Code Generation for AVR**
 
+[![CI](https://github.com/rugbedbugg/OptiFine/actions/workflows/ci.yml/badge.svg)](https://github.com/rugbedbugg/OptiFine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/rugbedbugg/OptiFine)](https://github.com/rugbedbugg/OptiFine/releases)
+
 OptiFine is a research compiler backend that generates energy-aware code for
 the AVR ATmega128. It compiles an INT8 neural-network classifier (from ONNX)
 and a 64-point Q15 DSP pipeline to AVR assembly, prices every emitted
@@ -11,14 +14,16 @@ Avrora cycle-accurate simulator.
 ## Status
 
 Research prototype, version 0.1.0. Both workloads compile end to end, and for
-every retained program the compiler's cycle prediction equals Avrora's count.
+every retained program the compiler's cycle prediction equals Avrora's count
+(the ML programs leave their final one-cycle `break` unpriced).
 **All energy figures are simulated** with Avrora's ATmega128 power model; no
 physical board has been measured. Interfaces may change.
 
 ## What it does
 
-- Compiles an ONNX classifier and a Q15 DSP pipeline to AVR through one typed
-  IR, one lowering and emission backend and one cost model.
+- Compiles an ONNX classifier and a Q15 DSP pipeline to AVR through one
+  verified workload graph, a generic control-flow MIR, one AVR backend and one
+  cost model.
 - **Active-mode optimization:** picks between alternative instruction
   sequences by predicted energy, with next-use register caching.
 - **Periodic power-aware scheduling:** wraps a compute body in a timer-driven
@@ -54,14 +59,18 @@ about 56%). The DSP busy-wait figure is normalized from Avrora's raw
 
 ```
 ONNX classifier --(ingest.c)----\
-                                 >-- typed IR --> lowering / candidates --> selection --> AVR assembly --> avr-gcc --> Avrora
+                                 >-- workload graph --> verify --> MIR --> AVR selection --> assembly --> avr-gcc --> Avrora
 DSP pipeline ---(dsp_build.c)---/
 ```
 
-Lowering produces one correct sequence per op; DSP ops use statically bounded
-counted loops. Every instruction is priced as cycles times one per-cycle
-constant calibrated to Avrora's ATmega128 model ([SOURCES.md](SOURCES.md)).
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The workload graph is verified, then translated into a generic MIR (basic
+blocks, typed values, memory objects): data movement as ordinary loads and
+stores, each workload kernel as a hand-scheduled AVR region with declared
+memory effects. DSP kernels use statically bounded counted loops. Cycles come
+from the AVR instruction timings; energy from a per-category table where
+every entry is cycles times one per-cycle constant calibrated to Avrora's
+ATmega128 model ([SOURCES.md](SOURCES.md)). Details, including the planned C
+frontend boundary: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Workloads
 
@@ -105,14 +114,15 @@ busy-wait energy at the same period, as it must.
 
 ## Build
 
-Requirements: CMake >= 3.16 and a C11 compiler; Python 3.9+ with `pytest`; for
+Requirements: CMake >= 3.16 and a C11 compiler (the tree builds as strict
+ISO C11); Python 3.9+ with `pytest`; for
 simulation, the AVR toolchain (`avr-gcc`, `avr-binutils`, `avr-libc`), JDK 8
 and Avrora Beta 1.7.115.
 
 ```bash
 cmake -S compiler -B compiler/build
 cmake --build compiler/build
-ctest --test-dir compiler/build
+ctest --test-dir compiler/build      # add -DOPTIFINE_WARNINGS_AS_ERRORS=ON to configure as CI does
 
 ./tools/setup_linux.sh                       # Linux: JDK 8 + Avrora into tools/ (not committed)
 export JAVA_HOME=$PWD/tools/jdk8u504-b01     # Avrora 1.7.115 needs JDK 8
@@ -184,8 +194,11 @@ hashes. Re-running the experiments with your own toolchain is described in
 - **Fixed, compile-time inputs;** no runtime sensor or host input.
 - **Narrow scope:** one classifier and one fixed DSP pipeline on one MCU; no
   general ONNX coverage, other FFT sizes or peak positions.
-- **Scoped register allocation:** caching covers MatMul's activation input
-  only.
+- **No general register allocator:** register caching covers MatMul's
+  activation input only.
+- **No C frontend yet:** MIR is designed to receive one (an EDG IL adapter is
+  planned), but calls, flash pointers and wider arithmetic are not
+  implemented below it.
 - **One accepted DSP periodic point,** with the busy-wait normalization above.
 
 More in [REPORT.md](REPORT.md#limitations).

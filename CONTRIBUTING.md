@@ -6,19 +6,27 @@ results correct and reproducible.
 ## Build and test
 
 ```sh
-cmake -S compiler -B compiler/build
+cmake -S compiler -B compiler/build -DOPTIFINE_WARNINGS_AS_ERRORS=ON
 cmake --build compiler/build
 ctest --test-dir compiler/build
 python3 -m pytest sim/tests
 ```
 
-The CI workflow (`.github/workflows/ci.yml`) runs the same commands; neither
-suite starts Avrora. Simulation needs the AVR toolchain, JDK 8 and Avrora; see
+The tree is strict ISO C11 (`-std=c11`) and warning-clean under
+`-Wall -Wextra -Wpedantic`. The CI workflow (`.github/workflows/ci.yml`) runs
+these commands with GCC and Clang, under AddressSanitizer and
+UndefinedBehaviorSanitizer, and as a Release build (the tests keep their
+asserts there), and checks that the retained ML and DSP programs regenerate
+byte for byte; neither suite starts Avrora. Simulation needs the AVR toolchain, JDK 8 and Avrora; see
 [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) (`tools/setup_linux.sh`
 fetches the last two on Linux).
 
 ## Expectations
 
+- **Respect the layers** (`docs/ARCHITECTURE.md`): a frontend produces either
+  a workload graph that passes `ir_verify` or MIR that passes `mir_verify`;
+  imperative code goes to MIR, never into the workload graph; nothing below
+  MIR depends on a frontend.
 - **Correctness first.** A cheaper instruction sequence that computes a
   different result is a failed change. Pair new compiler behaviour with a test
   under `compiler/tests/` that checks results exactly, and keep the compiler's
