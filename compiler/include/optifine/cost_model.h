@@ -21,7 +21,9 @@ typedef struct {
     size_t count;
 } CostModel;
 
-/* Returns 0 on success, non-zero on failure (missing file, parse error). */
+/* Returns 0 on success. On any failure -- missing file, malformed line,
+ * duplicate or over-long entry, too many entries -- prints a diagnostic with
+ * the line number, leaves out->count at 0 and returns non-zero. */
 int cost_model_load(const char *toml_path, CostModel *out);
 
 /* Returns NULL if `mnemonic` has no entry in the table. */

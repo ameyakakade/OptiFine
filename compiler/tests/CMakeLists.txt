@@ -27,6 +27,7 @@ endfunction()
 
 optifine_add_test(test_ir)
 optifine_add_test(test_pb_reader)
+optifine_add_test(test_cost_model ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml ${CMAKE_CURRENT_BINARY_DIR})
 optifine_add_test(test_ingest ARGS ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx)
 optifine_add_test(test_dsp_build)
 optifine_add_test(test_sram_layout_dsp)
