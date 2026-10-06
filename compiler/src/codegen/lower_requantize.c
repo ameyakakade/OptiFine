@@ -119,10 +119,11 @@ static void lower_requantize_element(InstrBuf *buf, uint16_t acc_addr, uint16_t 
         }
     }
 
-    /* Narrow to int8: the low byte is the requantized result. Compile-time
-     * verification (see lower_requantize) already confirmed this model's
-     * real worst-case magnitude fits in [-127,127] -- no runtime
-     * saturation is performed. */
+    /* Narrow to int8: the low byte is the requantized result. No runtime
+     * saturation is performed: lower_verify_demo_forward_pass has already
+     * checked that, for the one embedded input this program runs, every
+     * Requantize output lies in [-127,127]. That is not a bound over all
+     * inputs. */
     char addr_out[AVR_OPERAND_LEN];
     fmt_addr(addr_out, out_addr);
     ins2(buf, "sts", addr_out, r_prod[0]);
