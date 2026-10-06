@@ -1,6 +1,6 @@
 #include "optifine/codegen/lower.h"
+#include "optifine/invariant.h"
 
-#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -798,7 +798,7 @@ static void lower_fft_butterfly_stage(InstrBuf *buf, const IrGraph *graph,
     uint16_t out_addr = sram_layout_addr(layout, graph, op_id, 0);
     uint16_t sc = layout->dsp_scratch_addr;
 
-    assert(stage >= 0 && stage < DSP_FFT_LOG2);
+    OPTIFINE_INVARIANT(stage >= 0 && stage < DSP_FFT_LOG2);
     int half = 1 << stage;
     int blocks = DSP_FFT_SIZE / (half * 2);
     int span = half * 4; /* bytes from p to q */

@@ -1,11 +1,11 @@
 #include "optifine/codegen/instr_buf.h"
+#include "optifine/invariant.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
-#include <assert.h>
 
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/registers.h"
@@ -30,11 +30,17 @@ void instrbuf_push(InstrBuf *b, const char *mnemonic, int num_operands,
     }
     AvrInstr *ins = &b->items[b->count++];
     memset(ins, 0, sizeof(*ins));
-    snprintf(ins->mnemonic, AVR_MNEMONIC_LEN, "%s", mnemonic);
+    /* A truncated mnemonic or operand would still assemble, to the wrong
+     * thing, so every copy is checked to fit. */
+    OPTIFINE_INVARIANT(num_operands >= 0 && num_operands <= AVR_MAX_OPERANDS);
+    OPTIFINE_INVARIANT(strlen(mnemonic) < AVR_MNEMONIC_LEN);
+    memcpy(ins->mnemonic, mnemonic, strlen(mnemonic) + 1);
     ins->num_operands = num_operands;
-    if (num_operands >= 1) snprintf(ins->operands[0], AVR_OPERAND_LEN, "%s", o1);
-    if (num_operands >= 2) snprintf(ins->operands[1], AVR_OPERAND_LEN, "%s", o2);
-    if (num_operands >= 3) snprintf(ins->operands[2], AVR_OPERAND_LEN, "%s", o3);
+    const char *operands[AVR_MAX_OPERANDS] = {o1, o2, o3};
+    for (int i = 0; i < num_operands; i++) {
+        OPTIFINE_INVARIANT(operands[i] != NULL && strlen(operands[i]) < AVR_OPERAND_LEN);
+        memcpy(ins->operands[i], operands[i], strlen(operands[i]) + 1);
+    }
 }
 
 void ins1(InstrBuf *b, const char *m, const char *o1) {
@@ -68,7 +74,7 @@ void ins_data_word(InstrBuf *b, uint16_t value) {
 static void fmt_sym(char *out, const char *half, const char *symbol, int offset) {
     int n = offset ? snprintf(out, AVR_OPERAND_LEN, "%s(%s+%d)", half, symbol, offset)
                    : snprintf(out, AVR_OPERAND_LEN, "%s(%s)", half, symbol);
-    assert(n > 0 && n < AVR_OPERAND_LEN);
+    OPTIFINE_INVARIANT(n > 0 && n < AVR_OPERAND_LEN);
 }
 void fmt_lo8_sym(char *out, const char *symbol, int offset) { fmt_sym(out, "lo8", symbol, offset); }
 void fmt_hi8_sym(char *out, const char *symbol, int offset) { fmt_sym(out, "hi8", symbol, offset); }
@@ -130,18 +136,18 @@ int avr_local_label_rebase(const char *name, unsigned base, char *out) {
     } else {
         return 0;
     }
-    assert(n > 0 && n < AVR_OPERAND_LEN);
+    OPTIFINE_INVARIANT(n > 0 && n < AVR_OPERAND_LEN);
     return 1;
 }
 
 static void loop_open(InstrBuf *b, LoopCtx *ctx, uint32_t trip) {
     /* trip must fit the 8-bit counter `dec` drives, and a zero trip would
      * wrap to 256 rather than skipping the body. Both are compile-time
-     * properties of this project's fixed-size DSP pipeline, so an assert is
-     * the right check: there is no runtime path that can reach it with a bad
-     * value. */
-    assert(trip >= 1 && trip <= 256);
-    assert(b->num_loops < INSTRBUF_MAX_LOOPS);
+     * properties of the lowering, never of user input, so they are internal
+     * invariants -- checked in every build type, since a wrong trip count
+     * would assemble into a loop that runs the wrong number of times. */
+    OPTIFINE_INVARIANT(trip >= 1 && trip <= 256);
+    OPTIFINE_INVARIANT(b->num_loops < INSTRBUF_MAX_LOOPS);
     ctx->trip = trip;
     ctx->region = b->num_loops++;
     snprintf(ctx->label, AVR_OPERAND_LEN, LOCAL_HEAD_FMT, (unsigned)ctx->region);
@@ -235,7 +241,7 @@ void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx) {
         ins1(b, "brne", ctx->label);
     } else {
         /* Invert: skip past an unconditional jump back to the head. */
-        assert(words <= AVR_RJMP_REACH_WORDS);
+        OPTIFINE_INVARIANT(words <= AVR_RJMP_REACH_WORDS);
         char exit_label[AVR_OPERAND_LEN];
         snprintf(exit_label, AVR_OPERAND_LEN, LOCAL_EXIT_FMT, (unsigned)ctx->region);
         ins1(b, "breq", exit_label);

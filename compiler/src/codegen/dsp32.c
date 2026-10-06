@@ -1,6 +1,6 @@
 #include "optifine/codegen/dsp32.h"
+#include "optifine/invariant.h"
 
-#include <assert.h>
 
 #include "optifine/codegen/registers.h"
 
@@ -114,14 +114,14 @@ void dsp32_mul16x16(InstrBuf *b, int dst, int xlo, int xhi, int ylo, int yhi) {
 }
 
 void dsp32_mov(InstrBuf *b, int dst, int src) {
-    assert(dst % 2 == 0 && src % 2 == 0);
+    OPTIFINE_INVARIANT(dst % 2 == 0 && src % 2 == 0);
     char d[AVR_OPERAND_LEN], s[AVR_OPERAND_LEN];
     reg(d, dst);     reg(s, src);     ins2(b, "movw", d, s);
     reg(d, dst + 2); reg(s, src + 2); ins2(b, "movw", d, s);
 }
 
 void dsp32_load_imm(InstrBuf *b, int quad, uint32_t value, int scratch_reg) {
-    assert(scratch_reg >= 16);
+    OPTIFINE_INVARIANT(scratch_reg >= 16);
     char d[AVR_OPERAND_LEN], t[AVR_OPERAND_LEN], imm[AVR_OPERAND_LEN];
     reg(t, scratch_reg);
     for (int i = 0; i < DSP32_BYTES; i++) {
@@ -174,7 +174,7 @@ void dsp8_select(InstrBuf *b, int dst, int src, int mask_reg, int tmp_reg) {
 }
 
 void dsp32_isqrt(InstrBuf *b, int num, int res, int bit, int tmp, int mask_reg, int counter_reg) {
-    assert(num != res && num != bit && num != tmp && res != bit && res != tmp && bit != tmp);
+    OPTIFINE_INVARIANT(num != res && num != bit && num != tmp && res != bit && res != tmp && bit != tmp);
     dsp32_clear(b, res);
     dsp32_load_imm(b, bit, 1u << 30, mask_reg);
 

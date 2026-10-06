@@ -4,9 +4,16 @@
 # their repository-relative paths.
 set(OPTIFINE_REPO_ROOT ${CMAKE_SOURCE_DIR}/..)
 
+# The tests check results with assert(). Keep it compiled in for test code in
+# every build type, so a Release configuration runs the tests against the
+# NDEBUG-built optifine_core instead of turning every check into a no-op.
+add_library(optifine_test_settings INTERFACE)
+target_link_libraries(optifine_test_settings INTERFACE optifine_build_settings)
+target_compile_options(optifine_test_settings INTERFACE -UNDEBUG)
+
 add_library(optifine_test_support STATIC avr_interp.c)
 target_include_directories(optifine_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(optifine_test_support PUBLIC optifine_core)
+target_link_libraries(optifine_test_support PUBLIC optifine_core optifine_test_settings)
 
 # optifine_add_test(<name> [ARGS <arg>...])
 #   Builds <name>.c against optifine_core and the test support library and
@@ -53,7 +60,7 @@ optifine_add_test(test_periodic ARGS
 
 # Drives the built compiler as a subprocess; it links no compiler code.
 add_executable(test_dsp_cli test_dsp_cli.c)
-target_link_libraries(test_dsp_cli PRIVATE optifine_build_settings)
+target_link_libraries(test_dsp_cli PRIVATE optifine_test_settings)
 add_test(NAME test_dsp_cli COMMAND test_dsp_cli
     $<TARGET_FILE:optifine>
     ${OPTIFINE_REPO_ROOT}/cost_table.toml
