@@ -11,7 +11,7 @@ add_library(optifine_test_settings INTERFACE)
 target_link_libraries(optifine_test_settings INTERFACE optifine_build_settings)
 target_compile_options(optifine_test_settings INTERFACE -UNDEBUG)
 
-add_library(optifine_test_support STATIC avr_interp.c)
+add_library(optifine_test_support STATIC avr_interp.c mir_interp.c mir_programs.c)
 target_include_directories(optifine_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(optifine_test_support PUBLIC optifine_core optifine_test_settings)
 
@@ -26,6 +26,7 @@ function(optifine_add_test name)
 endfunction()
 
 optifine_add_test(test_ir)
+optifine_add_test(test_mir)
 optifine_add_test(test_pb_reader)
 optifine_add_test(test_cost_model ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml ${CMAKE_CURRENT_BINARY_DIR})
 optifine_add_test(test_ingest ARGS ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx)
