@@ -4,15 +4,27 @@
  * failing deep inside codegen. Shells out like test_periodic does.
  *
  * argv: <optifine> <cost_table.toml> <scratch dir> */
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L /* WEXITSTATUS, under strict C11 */
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* system()'s status encoding is platform-defined: Windows returns the exit
+ * code itself, POSIX a wait status decoded with WEXITSTATUS. */
+#if defined(_WIN32)
+#define EXIT_CODE(status) (status)
+#else
+#include <sys/wait.h>
+#define EXIT_CODE(status) WEXITSTATUS(status)
+#endif
+
 static const char *g_bin, *g_cost, *g_dir;
 
 static int run(const char *args) {
-    char cmd[2048];
+    char cmd[4096];
     snprintf(cmd, sizeof(cmd), "%s %s > %s/cli.log 2>&1", g_bin, args, g_dir);
     int rc = system(cmd);
     return rc;
@@ -34,7 +46,7 @@ static char *slurp(const char *path) {
 int main(int argc, char **argv) {
     assert(argc == 4);
     g_bin = argv[1]; g_cost = argv[2]; g_dir = argv[3];
-    char args[1024], out[512], in[512];
+    char args[2048], out[512], in[512];
 
     snprintf(out, sizeof(out), "%s/dsp_cli_out.s", g_dir);
     snprintf(args, sizeof(args), "--dsp --cost-table %s --out %s", g_cost, out);
@@ -76,7 +88,7 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         snprintf(args, sizeof(args), "%s --cost-table %s --out %s", bad[i], g_cost, out);
         int rc = run(args);
-        assert(rc != 0 && WEXITSTATUS(rc) == 2);
+        assert(rc != 0 && EXIT_CODE(rc) == 2);
         printf("  '%s': usage error\n", bad[i]);
     }
     /* Periodic scheduling: --dsp inside the periodic wrapper, both wait policies. */

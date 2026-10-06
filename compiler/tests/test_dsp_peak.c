@@ -240,7 +240,9 @@ static void test_synthetic(Fx *f) {
     print_trace("all zeros", &r);
     for (int p = 0; p < K; p++) assert(r.idx[p] == p && r.v[p] == 0);   /* 0,1,...,7 */
 
-    for (int i = 0; i < N; i++) v[i] = 1234; RUN("all equal 1234");
+    for (int i = 0; i < N; i++) v[i] = 1234;
+
+    RUN("all equal 1234");
     print_trace("all equal 1234", &r);
     for (int p = 0; p < K; p++) assert(r.idx[p] == p);
 
@@ -253,9 +255,11 @@ static void test_synthetic(Fx *f) {
     print_trace("three nonzero", &r);
 
     memset(v, 0, sizeof(v));
-    for (int j = 0; j < 8; j++) v[63 - 7 * j] = (uint16_t)(100 + j); RUN("exactly eight nonzero");
+    for (int j = 0; j < 8; j++) v[63 - 7 * j] = (uint16_t)(100 + j);
+    RUN("exactly eight nonzero");
     memset(v, 0, sizeof(v));
-    for (int j = 0; j < 20; j++) v[(j * 13) % N] = (uint16_t)(50 + (j % 7)); RUN("twenty nonzero, repeats");
+    for (int j = 0; j < 20; j++) v[(j * 13) % N] = (uint16_t)(50 + (j % 7));
+    RUN("twenty nonzero, repeats");
 
     for (int i = 0; i < N; i++) v[i] = (uint16_t)(i * 3);
     v[10] = 1000; v[20] = 1000; v[50] = 1000; RUN("duplicate maxima 10/20/50");
@@ -266,9 +270,13 @@ static void test_synthetic(Fx *f) {
     RUN("duplicate groups 900/500/7");
     print_trace("duplicate groups 900/500/7", &r);
 
-    for (int i = 0; i < N; i++) v[i] = (uint16_t)(i * 700); RUN("strictly increasing");
-    for (int i = 0; i < N; i++) v[i] = (uint16_t)(46340 - i * 700); RUN("strictly decreasing");
-    for (int i = 0; i < N; i++) v[i] = (i & 1) ? 30000 : 12; RUN("alternating high/low");
+    for (int i = 0; i < N; i++) v[i] = (uint16_t)(i * 700);
+
+    RUN("strictly increasing");
+    for (int i = 0; i < N; i++) v[i] = (uint16_t)(46340 - i * 700);
+    RUN("strictly decreasing");
+    for (int i = 0; i < N; i++) v[i] = (i & 1) ? 30000 : 12;
+    RUN("alternating high/low");
 
     for (int i = 0; i < N; i++) v[i] = (uint16_t)(32760 + (i % 16));   /* straddles 32767/32768 */
     RUN("around 32767/32768");
@@ -281,7 +289,8 @@ static void test_synthetic(Fx *f) {
     v[5] = 46340; v[44] = 46340; RUN("46340 twice");
     print_trace("46340 twice", &r);
     assert(r.v[0] == 46340 && r.idx[0] == 5 && r.idx[1] == 44);
-    for (int i = 0; i < N; i++) v[i] = (i & 1) ? 0xFFFF : 0x8000; RUN("0xFFFF/0x8000 (full uint16)");
+    for (int i = 0; i < N; i++) v[i] = (i & 1) ? 0xFFFF : 0x8000;
+    RUN("0xFFFF/0x8000 (full uint16)");
 
     static const uint32_t seeds[] = {1u, 42u, 0xC0FFEEu, 20260924u, 0xDEADBEEFu, 7u, 99991u, 0x2545F491u};
     for (size_t s = 0; s < sizeof(seeds) / sizeof(seeds[0]); s++) {
@@ -458,7 +467,7 @@ static void emit_standalone(Fx *f, const char *path) {
     AvrInterp *in = malloc(sizeof(AvrInterp));
     avr_interp_init(in);
     assert(avr_interp_run(in, &h) == 0);
-    unsigned long hc = in->cycles;
+    assert(in->cycles == h.cycles);
     Result r;
     run_peak(f, in, &r);
     assert(check_against_oracle(&r, v, "fixture") == 0);

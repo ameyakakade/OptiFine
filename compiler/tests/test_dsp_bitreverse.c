@@ -170,7 +170,7 @@ static void test_touches_nothing_outside_its_regions(void) {
     size_t touched_outside = 0;
     for (size_t a = 0x0100; a < AVR_INTERP_MEM_SIZE; a++) {
         if (a >= out_lo && a < out_hi) continue;
-        if (a >= f.in_addr && a < f.in_addr + DSP_FFT_SIZE * 2) continue; /* seeded input */
+        if (a >= f.in_addr && a < (size_t)f.in_addr + DSP_FFT_SIZE * 2) continue; /* seeded input */
         if (in.mem[a] != 0xA5) touched_outside++;
     }
     printf("  E. bounds: wrote %zu bytes outside [0x%04X,0x%04X) (expect 0)\n",
@@ -183,7 +183,7 @@ static void test_touches_nothing_outside_its_regions(void) {
         int is_ld = !strcmp(ins->mnemonic, "lds"), is_st = !strcmp(ins->mnemonic, "sts");
         if (!is_ld && !is_st) continue;
         unsigned addr = (unsigned)strtoul(ins->operands[is_ld ? 1 : 0], NULL, 16);
-        if (is_ld) assert(addr >= f.in_addr && addr < f.in_addr + DSP_FFT_SIZE * 2);
+        if (is_ld) assert(addr >= f.in_addr && addr < (unsigned)f.in_addr + DSP_FFT_SIZE * 2);
         else       assert(addr >= out_lo && addr < out_hi);
     }
     printf("  E. every emitted lds/sts address is inside its declared region\n");

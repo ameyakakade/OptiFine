@@ -12,6 +12,11 @@
 #include "optifine/codegen/registers.h"
 #include "optifine/dsp_build.h"
 
+/* M_PI is POSIX, not ISO C11; see dsp_build.c. */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 /* ---------------------------------------------------------------------- */
 
 int lower_init_zero_reg(const CostModel *cost_model, Candidate *out) {
@@ -1140,7 +1145,6 @@ int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_inpu
                 break;
             case OP_MATMUL: {
                 const IrOp *in_op = &graph->ops[op->inputs[0]];
-                const IrOp *w_op = &graph->ops[op->inputs[1]];
                 size_t k_dim = in_op->output_shape[in_op->output_shape_len - 1];
                 for (size_t out_n = 0; out_n < n; out_n++) {
                     int64_t sum = 0;

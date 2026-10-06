@@ -203,8 +203,14 @@ static int16_t rd16(const uint8_t *m, uint32_t a) { return (int16_t)(m[a] | (m[a
  * elements per stage into `counts` (one slot per role). */
 static int check_buffers(const Fx *f, const uint8_t *m, const Ref *r, unsigned long *counts) {
     int bad = 0;
-#define EQ(role, got, want) do { counts[role]++; if ((got) != (want)) { if (bad < 4) \
-    printf("    role %d elem %d: got %d want %d\n", role, i, (int)(got), (int)(want)); bad++; } } while (0)
+#define EQ(role, got, want)                                                                      \
+    do {                                                                                         \
+        counts[role]++;                                                                          \
+        if ((got) != (want)) {                                                                   \
+            if (bad < 4) printf("    role %d elem %d: got %d want %d\n", role, i, (int)(got), (int)(want)); \
+            bad++;                                                                               \
+        }                                                                                        \
+    } while (0)
     for (int i = 0; i < N; i++) {
         EQ(ROLE_INPUT, rd16(m, addr_of(f, ROLE_INPUT) + 2 * i), r->input[i]);
         EQ(ROLE_CONST, rd16(m, addr_of(f, ROLE_CONST) + 2 * i), r->coeff[i]);
@@ -590,7 +596,11 @@ static void test_periodic_wrapper_keeps_the_program(Fx *f, const int8_t *input) 
         assert(pushes == 2);
         const char *reti = strstr(isr, "reti");
         assert(reti);
-        char *isr_text = strndup(isr, (size_t)(reti - isr));
+        size_t isr_len = (size_t)(reti - isr);
+        char *isr_text = malloc(isr_len + 1);
+        assert(isr_text);
+        memcpy(isr_text, isr, isr_len);
+        isr_text[isr_len] = '\0';
         assert(strstr(isr_text, "sei") == NULL);
         free(isr_text);
         assert(strstr(text, "call ") == NULL);
