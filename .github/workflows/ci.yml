@@ -1,5 +1,5 @@
 # Builds the compiler and runs both test suites on every push to main and
-# every pull request. Neither suite starts Avrora or needs the AVR toolchain:
+# every pull request. Nothing here starts Avrora or needs the AVR toolchain:
 # the C tests run generated programs in the test-only AVR interpreter, and
 # the Python tests revalidate the retained evidence under sim/fixtures/ from
 # its raw files. Full simulator reproduction is documented in
@@ -20,7 +20,67 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  compiler:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Debug keeps assert() in the compiler as well as the tests.
+          - name: GCC Debug
+            cc: gcc-13
+            build_type: Debug
+          - name: Clang Debug
+            cc: clang-18
+            build_type: Debug
+          # AddressSanitizer and UndefinedBehaviorSanitizer over the C tests,
+          # in a Debug build so assertions stay enabled.
+          - name: Clang ASan+UBSan
+            cc: clang-18
+            build_type: Debug
+            cflags: -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+          # The compiler under NDEBUG. The tests keep their own assert()
+          # (tests/CMakeLists.txt undefines NDEBUG for test code), so this runs
+          # them against the optimized, assertion-free optifine_core.
+          - name: GCC Release
+            cc: gcc-13
+            build_type: Release
+    env:
+      CC: ${{ matrix.cc }}
+      ASAN_OPTIONS: detect_leaks=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S compiler -B compiler/build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DOPTIFINE_WARNINGS_AS_ERRORS=ON
+          "-DCMAKE_C_FLAGS=${{ matrix.cflags }}"
+
+      - name: Build
+        run: cmake --build compiler/build --parallel
+
+      - name: C tests
+        run: ctest --test-dir compiler/build --output-on-failure
+
+      # The retained assembly is what this compiler generated when the
+      # evidence was captured; regenerating it must give the same bytes.
+      - name: Regenerate the retained programs
+        run: |
+          set -e
+          bin=compiler/build/optifine
+          out=$(mktemp -d)
+          $bin models/tiny_classifier.onnx --cost-table cost_table.toml --out $out/naive.s
+          $bin models/tiny_classifier.onnx --optimized --cost-table cost_table.toml --out $out/optimized.s
+          $bin --dsp --cost-table cost_table.toml --out $out/dsp.s
+          cmp $out/naive.s sim/fixtures/active_ml/naive.s
+          cmp $out/optimized.s sim/fixtures/active_ml/optimized.s
+          cmp $out/dsp.s sim/fixtures/dsp/dsp.s
+
+  evidence:
+    name: Retained evidence
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -31,17 +91,6 @@ jobs:
 
       - name: Install pytest
         run: python -m pip install pytest==9.1.1
-
-      # Default (Debug) build: the C tests rely on assert(), which a
-      # Release build's NDEBUG would compile out.
-      - name: Configure
-        run: cmake -S compiler -B compiler/build
-
-      - name: Build
-        run: cmake --build compiler/build --parallel
-
-      - name: C tests
-        run: ctest --test-dir compiler/build --output-on-failure
 
       - name: Python tests
         run: python -m pytest sim/tests
