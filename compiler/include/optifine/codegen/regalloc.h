@@ -34,6 +34,7 @@ typedef struct {
     size_t count;
 } RegAllocResult;
 
+/* Returns 0, or -1 when the result cannot be allocated. */
 int regalloc_next_use(const IrGraph *graph, RegAllocResult *out);
 void regalloc_result_free(RegAllocResult *result);
 

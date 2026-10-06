@@ -3,8 +3,12 @@
 #include <stdlib.h>
 
 int regalloc_next_use(const IrGraph *graph, RegAllocResult *out) {
-    out->assignment = calloc(graph->count, sizeof(int));
+    out->assignment = calloc(graph->count > 0 ? graph->count : 1, sizeof(int));
     out->count = graph->count;
+    if (!out->assignment) {
+        out->count = 0;
+        return -1;
+    }
     for (size_t i = 0; i < graph->count; i++) {
         out->assignment[i] = -1;
     }

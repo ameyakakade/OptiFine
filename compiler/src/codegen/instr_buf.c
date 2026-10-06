@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <math.h>
 
@@ -19,13 +20,27 @@ void instrbuf_init(InstrBuf *b) {
     b->count = 0;
     b->capacity = 0;
     b->num_loops = 0;
+    b->out_of_memory = 0;
 }
 
 void instrbuf_push(InstrBuf *b, const char *mnemonic, int num_operands,
                     const char *o1, const char *o2, const char *o3) {
+    if (b->out_of_memory) {
+        return;
+    }
     if (b->count == b->capacity) {
         size_t new_cap = b->capacity ? b->capacity * 2 : 64;
-        b->items = realloc(b->items, new_cap * sizeof(AvrInstr));
+        AvrInstr *grown = NULL;
+        if (new_cap > b->capacity && new_cap <= SIZE_MAX / sizeof(AvrInstr)) {
+            grown = realloc(b->items, new_cap * sizeof(AvrInstr));
+        }
+        if (!grown) {
+            /* Sticky: later pushes are dropped and instrbuf_price fails, so
+             * a lowering routine need not check every single push. */
+            b->out_of_memory = 1;
+            return;
+        }
+        b->items = grown;
         b->capacity = new_cap;
     }
     AvrInstr *ins = &b->items[b->count++];
@@ -255,6 +270,12 @@ void instrbuf_loop_end(InstrBuf *b, LoopCtx *ctx) {
 }
 
 int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
+    if (buf->out_of_memory) {
+        fprintf(stderr, "instr_buf: out of memory building an instruction sequence\n");
+        free(buf->items);
+        buf->items = NULL;
+        return -1;
+    }
     double energy_nj = 0.0;
     for (size_t i = 0; i < buf->count; i++) {
         /* A label is an assembler directive, not an instruction: it occupies

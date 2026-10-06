@@ -28,6 +28,7 @@ typedef struct {
     size_t capacity;
     LoopRegion loops[INSTRBUF_MAX_LOOPS];
     size_t num_loops;
+    int out_of_memory; /* set when growing `items` failed; instrbuf_price then fails */
 } InstrBuf;
 
 /* Open counted-loop handle. Opaque to callers apart from being storage. */
@@ -139,8 +140,9 @@ void fmt_lo8_sym(char *out, const char *symbol, int offset);
 void fmt_hi8_sym(char *out, const char *symbol, int offset);
 
 /* Converts a finished InstrBuf into a priced Candidate, taking ownership of
- * buf->items. Returns 0 on success, -1 (with an error printed) if any
- * instruction has no cost-category mapping or no cost_table.toml entry.
+ * buf->items. Returns 0 on success, -1 (with an error printed, and the items
+ * freed) if building the buffer ran out of memory or any instruction has no
+ * cost-category mapping or no cost_table.toml entry.
  * Every cost_table.toml entry is cycles x a single per-cycle constant (see
  * SOURCES.md's "Per-cycle energy constant" section);
  * `cycles` is derived from energy rather than tracked separately, so the

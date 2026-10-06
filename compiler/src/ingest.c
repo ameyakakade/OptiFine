@@ -1,5 +1,6 @@
 #include "optifine/ingest.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,9 +116,8 @@ static int parse_attribute(PbReader r, OnnxNode *node) {
                  * the proto3-packed-by-default convention (which doesn't
                  * hold here). This case fires once per element. */
                 if (field.wire_type != PB_WIRE_VARINT) return -1;
-                if (ints_len < MAX_SHAPE_DIMS) {
-                    ints_val[ints_len++] = (int64_t)field.varint;
-                }
+                if (ints_len == MAX_SHAPE_DIMS) return -1; /* more dims than supported */
+                ints_val[ints_len++] = (int64_t)field.varint;
                 break;
             default:
                 break;
@@ -147,11 +147,10 @@ static int parse_node(PbReader r, OnnxNode *node) {
         switch (field.field_number) {
             case ONNX_NODE_INPUT:
                 if (field.wire_type != PB_WIRE_LEN) return -1;
-                if (node->num_inputs < MAX_NODE_INPUTS) {
-                    node->inputs[node->num_inputs].ptr = field.bytes;
-                    node->inputs[node->num_inputs].len = field.bytes_len;
-                    node->num_inputs++;
-                }
+                if (node->num_inputs == MAX_NODE_INPUTS) return -1; /* no supported op has more */
+                node->inputs[node->num_inputs].ptr = field.bytes;
+                node->inputs[node->num_inputs].len = field.bytes_len;
+                node->num_inputs++;
                 break;
             case ONNX_NODE_OUTPUT:
                 if (field.wire_type != PB_WIRE_LEN) return -1;
@@ -220,15 +219,20 @@ int ingest_load_onnx(const char *path, IrGraph *out) {
     if (!f) {
         return 1;
     }
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (size <= 0) {
+    long size = -1;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        size = ftell(f);
+    }
+    if (size <= 0 || fseek(f, 0, SEEK_SET) != 0) {
         fclose(f);
         return 1;
     }
 
     uint8_t *buf = malloc((size_t)size);
+    if (!buf) {
+        fclose(f);
+        return 1;
+    }
     size_t nread = fread(buf, 1, (size_t)size, f);
     fclose(f);
     if (nread != (size_t)size) {
@@ -323,11 +327,21 @@ int ingest_load_onnx(const char *path, IrGraph *out) {
         /* export_model.py's DT_INT8/DT_INT32 constants are defined to
          * equal these enum ordinals exactly, so this cast needs no lookup
          * table -- see export_model.py's module docstring. */
+        if (node.dtype < 0 || node.dtype > DT_COMPLEX_Q15) {
+            ir_graph_free(out);
+            free(buf);
+            return 1;
+        }
         DType dtype = (DType)node.dtype;
 
         size_t *inputs = NULL;
         if (node.num_inputs > 0) {
             inputs = malloc(node.num_inputs * sizeof(size_t));
+            if (!inputs) {
+                ir_graph_free(out);
+                free(buf);
+                return 1;
+            }
             for (size_t j = 0; j < node.num_inputs; j++) {
                 int found = 0;
                 for (size_t k = 0; k < num_names; k++) {
@@ -353,14 +367,43 @@ int ingest_load_onnx(const char *path, IrGraph *out) {
         size_t *shape = NULL;
         if (node.shape_len > 0) {
             shape = malloc(node.shape_len * sizeof(size_t));
+            if (!shape) {
+                free(inputs);
+                ir_graph_free(out);
+                free(buf);
+                return 1;
+            }
             for (size_t j = 0; j < node.shape_len; j++) {
+                /* Dims are read as unsigned varints; one that is negative as
+                 * an int64 or wider than size_t cannot be a tensor extent.
+                 * Zero and implausibly large extents are ir_verify's to
+                 * reject, against the op's real contract. */
+                if (node.shape[j] < 0 || (uint64_t)node.shape[j] > SIZE_MAX) {
+                    free(shape);
+                    free(inputs);
+                    ir_graph_free(out);
+                    free(buf);
+                    return 1;
+                }
                 shape[j] = (size_t)node.shape[j];
             }
         }
 
+        if (node.zero_point < INT32_MIN || node.zero_point > INT32_MAX) {
+            free(shape);
+            free(inputs);
+            ir_graph_free(out);
+            free(buf);
+            return 1;
+        }
         QuantParams quant = { node.scale, (int32_t)node.zero_point };
-        size_t op_id = ir_graph_push(out, kind, inputs, node.num_inputs,
-                                      shape, node.shape_len, dtype, &quant);
+        size_t op_id;
+        if (ir_graph_push(out, kind, inputs, node.num_inputs,
+                          shape, node.shape_len, dtype, &quant, &op_id) != 0) {
+            ir_graph_free(out);
+            free(buf);
+            return 1;
+        }
 
         if (num_names < MAX_NODES) {
             names[num_names].name = node.output;
@@ -372,7 +415,16 @@ int ingest_load_onnx(const char *path, IrGraph *out) {
             int found_init = 0;
             for (size_t k = 0; k < num_initializers; k++) {
                 if (slice_eq_slice(initializers[k].name, node.output)) {
-                    void *data = malloc(initializers[k].raw_data.len);
+                    /* malloc(0) may return NULL; an empty initializer still
+                     * gets a real buffer so "no data" stays distinguishable,
+                     * and ir_verify checks the length against the tensor. */
+                    size_t len = initializers[k].raw_data.len;
+                    void *data = malloc(len > 0 ? len : 1);
+                    if (!data) {
+                        ir_graph_free(out);
+                        free(buf);
+                        return 1;
+                    }
                     memcpy(data, initializers[k].raw_data.ptr, initializers[k].raw_data.len);
                     ir_op_set_data(out, op_id, data, initializers[k].raw_data.len);
                     found_init = 1;

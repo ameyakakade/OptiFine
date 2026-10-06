@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -53,47 +54,87 @@ static int parse_unsigned(const char *text, unsigned long maximum, unsigned long
     return 0;
 }
 
-/* Reads whitespace-separated decimal int16 samples from `path` (same format
- * and `#` comments as read_demo_input) into their little-endian byte image,
- * which is what OP_INPUT embeds for a DT_FIXED_Q15 tensor. The byte count is
- * checked against the graph by lower_op. Returns the buffer (caller frees) or
- * NULL. */
-static int8_t *read_dsp_input(const char *path, size_t *out_len) {
+/* Reads whitespace-separated decimal integers in [min_value, max_value] from
+ * `path`, with `#` starting a comment that runs to the end of the line, and
+ * stores each as `width` little-endian bytes (1 for int8, 2 for int16) -- the
+ * byte image OP_INPUT embeds. Anything else on a line (a non-numeric token, a
+ * value out of range, a line too long for the buffer) is an error, not the
+ * end of the data. The byte count is checked against the graph later.
+ * Returns the buffer (caller frees) and sets *out_len, or NULL with a
+ * diagnostic. */
+static int8_t *read_input_values(const char *path, const char *what, long min_value, long max_value,
+                                 size_t width, size_t *out_len) {
     FILE *f = fopen(path, "r");
     if (!f) {
-        fprintf(stderr, "failed to open DSP input file: %s\n", path);
+        fprintf(stderr, "failed to open %s file: %s\n", what, path);
         return NULL;
     }
     size_t cap = 128, len = 0;
     uint8_t *buf = malloc(cap);
     char line[1024];
-    while (fgets(line, sizeof(line), f)) {
+    unsigned line_no = 0;
+    const char *error = buf ? NULL : "out of memory";
+    while (!error && fgets(line, sizeof(line), f)) {
+        line_no++;
+        if (strchr(line, '\n') == NULL && !feof(f)) {
+            error = "line too long";
+            break;
+        }
         char *hash = strchr(line, '#');
         if (hash) *hash = '\0';
         char *cursor = line;
-        char *endptr;
-        while (1) {
+        for (;;) {
+            while (isspace((unsigned char)*cursor)) cursor++;
+            if (*cursor == '\0') break;
+            char *endptr;
+            errno = 0;
             long v = strtol(cursor, &endptr, 10);
-            if (endptr == cursor) break;
-            if (v < INT16_MIN || v > INT16_MAX) {
-                fprintf(stderr, "DSP input file %s: value %ld out of int16 range\n", path, v);
-                free(buf);
-                fclose(f);
-                return NULL;
+            if (endptr == cursor || (*endptr != '\0' && !isspace((unsigned char)*endptr))) {
+                error = "not a decimal integer";
+                break;
             }
-            if (len + 2 > cap) {
+            if (errno != 0 || v < min_value || v > max_value) {
+                fprintf(stderr, "%s file %s:%u: value out of range [%ld,%ld]\n", what, path, line_no,
+                        min_value, max_value);
+                error = "";
+                break;
+            }
+            if (len + width > cap) {
+                uint8_t *grown = cap <= SIZE_MAX / 2 ? realloc(buf, cap * 2) : NULL;
+                if (!grown) {
+                    error = "out of memory";
+                    break;
+                }
+                buf = grown;
                 cap *= 2;
-                buf = realloc(buf, cap);
             }
-            uint16_t u = (uint16_t)(int16_t)v;
-            buf[len++] = (uint8_t)(u & 0xFF);
-            buf[len++] = (uint8_t)(u >> 8);
+            uint16_t u = (uint16_t)v; /* two's complement image of the in-range value */
+            for (size_t b = 0; b < width; b++) {
+                buf[len++] = (uint8_t)(u >> (8 * b));
+            }
             cursor = endptr;
         }
     }
+    if (!error && ferror(f)) error = "read error";
     fclose(f);
+    if (error) {
+        if (error[0] != '\0') fprintf(stderr, "%s file %s:%u: %s\n", what, path, line_no, error);
+        free(buf);
+        return NULL;
+    }
     *out_len = len;
     return (int8_t *)buf;
+}
+
+/* 64 int16 Q15 samples for --dsp. */
+static int8_t *read_dsp_input(const char *path, size_t *out_len) {
+    return read_input_values(path, "DSP input", INT16_MIN, INT16_MAX, 2, out_len);
+}
+
+/* The ML demo input: int8 values in [-127,127], the symmetric range the
+ * quantized model uses. */
+static int8_t *read_demo_input(const char *path, size_t *out_len) {
+    return read_input_values(path, "input", -127, 127, 1, out_len);
 }
 
 /* The periodic cost lines, shared by the ML and --dsp periodic modes;
@@ -135,7 +176,13 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
         return 1;
     }
     RegAllocResult regalloc;
-    regalloc_next_use(&graph, &regalloc);
+    if (regalloc_next_use(&graph, &regalloc) != 0) {
+        fprintf(stderr, "out of memory in reuse analysis\n");
+        free(input);
+        sram_layout_free(&layout);
+        ir_graph_free(&graph);
+        return 1;
+    }
 
     int rc = 1;
     FILE *out = fopen(out_path, "w");
@@ -175,46 +222,6 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
     sram_layout_free(&layout);
     ir_graph_free(&graph);
     return rc == 0 ? 0 : 1;
-}
-
-/* Reads whitespace-separated decimal int8 values from `path` into a
- * malloc'd buffer, one line at a time, stripping `#`-prefixed comments
- * (same convention as cost_model.c's TOML parser). Returns the buffer
- * (caller frees) and sets *out_len, or returns NULL on failure. */
-static int8_t *read_demo_input(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        fprintf(stderr, "failed to open input file: %s\n", path);
-        return NULL;
-    }
-    size_t cap = 64, len = 0;
-    int8_t *buf = malloc(cap * sizeof(int8_t));
-    char line[1024];
-    while (fgets(line, sizeof(line), f)) {
-        char *hash = strchr(line, '#');
-        if (hash) *hash = '\0';
-        char *cursor = line;
-        char *endptr;
-        while (1) {
-            long v = strtol(cursor, &endptr, 10);
-            if (endptr == cursor) break; /* no more numbers on this line */
-            if (v < -127 || v > 127) {
-                fprintf(stderr, "input file %s: value %ld out of int8 range [-127,127]\n", path, v);
-                free(buf);
-                fclose(f);
-                return NULL;
-            }
-            if (len == cap) {
-                cap *= 2;
-                buf = realloc(buf, cap * sizeof(int8_t));
-            }
-            buf[len++] = (int8_t)v;
-            cursor = endptr;
-        }
-    }
-    fclose(f);
-    *out_len = len;
-    return buf;
 }
 
 int main(int argc, char **argv) {
@@ -354,7 +361,13 @@ int main(int argc, char **argv) {
     /* Real next-use analysis (see regalloc.h) -- only meaningfully consulted
      * when --optimized routes through candidates_generate; the naive path
      * (lower_op) ignores it and always spills, as the naive baseline does. */
-    regalloc_next_use(&graph, &regalloc);
+    if (regalloc_next_use(&graph, &regalloc) != 0) {
+        fprintf(stderr, "out of memory in reuse analysis\n");
+        free(demo_input);
+        sram_layout_free(&layout);
+        ir_graph_free(&graph);
+        return 1;
+    }
 
     FILE *out = fopen(out_path, "w");
     if (!out) {

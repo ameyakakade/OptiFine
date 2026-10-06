@@ -18,7 +18,8 @@
 
 /* Builds Window -> BitReverse -> FftButterfly (xDSP_FFT_LOG2) -> Magnitude
  * -> PeakExtract -> Output into `out`. `out` must not already be
- * initialized (this calls ir_graph_init itself). Returns 0 on success. */
+ * initialized (this calls ir_graph_init itself). Returns 0 on success, or
+ * -1 with `out` freed when an allocation fails. */
 int dsp_build_pipeline(IrGraph *out);
 
 #endif /* OPTIFINE_DSP_BUILD_H */

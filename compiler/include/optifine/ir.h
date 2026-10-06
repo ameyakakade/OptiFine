@@ -63,16 +63,32 @@ typedef struct {
 void ir_graph_init(IrGraph *graph);
 void ir_graph_free(IrGraph *graph);
 
-/* Appends an op, taking ownership of `inputs` and `output_shape` (must be
- * heap-allocated with malloc, or NULL if the respective length is 0).
- * Returns the new op's id. */
-size_t ir_graph_push(IrGraph *graph, OpKind kind,
-                      size_t *inputs, size_t num_inputs,
-                      size_t *output_shape, size_t output_shape_len,
-                      DType dtype, const QuantParams *quant);
+/* Appends an op and stores its id in *out_id. Takes ownership of `inputs`
+ * and `output_shape` (heap-allocated with malloc, or NULL when the length is
+ * 0) whether or not it succeeds: on failure -- the op array cannot grow --
+ * both are freed, the graph is unchanged and -1 is returned. */
+int ir_graph_push(IrGraph *graph, OpKind kind,
+                  size_t *inputs, size_t num_inputs,
+                  size_t *output_shape, size_t output_shape_len,
+                  DType dtype, const QuantParams *quant, size_t *out_id);
 
 /* Attaches compile-time-constant data to an already-pushed op, taking
  * ownership of `data` (must be heap-allocated with malloc). */
 void ir_op_set_data(IrGraph *graph, size_t op_id, void *data, size_t data_len);
+
+/* Bytes per element of `dtype`: 1 (DT_INT8), 4 (DT_INT32), 2 (DT_FIXED_Q15),
+ * 4 (DT_COMPLEX_Q15, a real:imaginary Q15 pair). 0 for a value outside the
+ * enum. */
+size_t ir_dtype_size(DType dtype);
+
+/* a * b into *out, or -1 when the product does not fit size_t. */
+int ir_mul_size(size_t a, size_t b, size_t *out);
+
+/* Element count (the product of output_shape, 1 for a scalar) and byte size
+ * of `op`'s output tensor, computed with overflow checks. Returns -1 when
+ * either product overflows, the shape pointer is missing, or the dtype is
+ * unknown; ir_verify rejects such ops, so code downstream of it may use the
+ * unchecked sram_layout_num_elements. Either out pointer may be NULL. */
+int ir_op_tensor_size(const IrOp *op, size_t *out_elements, size_t *out_bytes);
 
 #endif /* OPTIFINE_IR_H */

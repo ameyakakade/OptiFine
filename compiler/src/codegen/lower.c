@@ -1114,13 +1114,22 @@ static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *
  * rescale (compute_fixed_multiplier) the generated AVR code uses, and
  * refuses to compile only if THAT computation overflows int8. */
 int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_input, size_t demo_input_len) {
-    int64_t **vals = calloc(graph->count, sizeof(int64_t *));
+    int64_t **vals = calloc(graph->count > 0 ? graph->count : 1, sizeof(int64_t *));
+    if (!vals) {
+        fprintf(stderr, "lower: out of memory verifying the demo input\n");
+        return -1;
+    }
     int rc = 0;
 
     for (size_t i = 0; i < graph->count && rc == 0; i++) {
         const IrOp *op = &graph->ops[i];
         size_t n = sram_layout_num_elements(op);
         vals[i] = calloc(n, sizeof(int64_t));
+        if (!vals[i]) {
+            fprintf(stderr, "lower: out of memory verifying the demo input\n");
+            rc = -1;
+            break;
+        }
 
         switch (op->kind) {
             case OP_INPUT: {
