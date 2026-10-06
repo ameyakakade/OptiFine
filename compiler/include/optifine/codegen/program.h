@@ -1,11 +1,10 @@
-/* Orchestrates per-op lowering for the whole graph into one flat AVR .s
- * program. Each op's candidate(s) are routed through select_min_energy
- * (a real cost-based pick when candidates_generate returns more than one,
- * a pass-through otherwise). There is no locality or scheduling pass: the
- * selected sequence is emitted as lowered. See
- * codegen_emit_program's `use_real_candidates` parameter for the choice
- * between the naive baseline and active-mode optimization's real candidate
- * diversity. */
+/* Emits whole programs for a verified workload graph. Every region goes
+ * workload HIR -> MIR (hir_to_mir.h) -> AVR selection (avr_mir.h) ->
+ * EmitUnit; each region builds only the MIR function it emits. Kernel ops
+ * reach MIR as the candidate select_min_energy picked (a real cost-based
+ * choice where candidates_generate returns more than one, a pass-through
+ * otherwise). There is no locality or scheduling pass. Costs are accumulated
+ * per HIR op, in graph order. */
 #ifndef OPTIFINE_CODEGEN_PROGRAM_H
 #define OPTIFINE_CODEGEN_PROGRAM_H
 
@@ -54,11 +53,10 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
 /* Writes a complete AVR .s program for `graph` to `out`, wrapped with the
  * .arch/.section/_start:/break boilerplate. `demo_input`/`demo_input_len`
  * feed OP_INPUT (see codegen/lower.h). `use_real_candidates` selects the
- * per-op lowering strategy: 0 calls lower_op directly (the naive
- * baseline, one candidate per op, byte-for-byte the original behavior);
- * 1 calls codegen/candidates.h's candidates_generate instead, letting
- * select_min_energy pick the cheapest of however many real candidates it
- * returns (active-mode optimization). Returns 0 on success, non-zero (with an error
+ * kernel lowering: 0 takes lower_op's single candidate (the naive
+ * baseline); 1 takes the cheapest of candidates_generate's candidates
+ * (active-mode optimization). The final `break` is written by the epilogue and
+ * not priced, so ProgramCost covers everything but that one cycle. Returns 0 on success, non-zero (with an error
  * already printed to stderr) if any op fails to lower. */
 int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
                           const ReuseAnalysis *reuse, const CostModel *cost_model,
@@ -77,8 +75,8 @@ int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model
 /* The DSP path's complete program (graph from dsp_build_pipeline): one
  * assembly unit holding the zero-register init, OP_INPUT (the samples,
  * embedded at compile time exactly as the ML path embeds its demo input) and
- * OP_CONST, then every remaining op in graph order through lower_op, then
- * lower_dsp_program_end's break and twiddle table.
+ * OP_CONST, then every remaining op in graph order, then the break and the
+ * program-memory constants (the twiddle table).
  *
  * Unlike codegen_emit_program's ML epilogue, the break here is priced, so
  * initialization + body + termination is the whole executed region: the
