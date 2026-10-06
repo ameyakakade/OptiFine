@@ -13,7 +13,7 @@
 
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/lower.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -55,16 +55,16 @@ static void host_stage0(const int16_t *in_re, const int16_t *in_im,
     }
 }
 
-typedef struct { IrGraph graph; SramLayout layout; RegAllocResult ra; uint16_t in_addr, out_addr; } Fx;
+typedef struct { IrGraph graph; SramLayout layout; ReuseAnalysis ra; uint16_t in_addr, out_addr; } Fx;
 static void fx_init(Fx *f) {
     assert(dsp_build_pipeline(&f->graph) == 0);
     assert(sram_layout_build(&f->graph, &f->layout) == 0);
-    assert(regalloc_next_use(&f->graph, &f->ra) == 0);
+    assert(reuse_analyze(&f->graph, &f->ra) == 0);
     assert(f->graph.ops[STAGE0_OP].kind == OP_FFT_BUTTERFLY);
     f->in_addr = sram_layout_addr(&f->layout, &f->graph, BITREV_OP, 0);
     f->out_addr = sram_layout_addr(&f->layout, &f->graph, STAGE0_OP, 0);
 }
-static void fx_free(Fx *f) { regalloc_result_free(&f->ra); sram_layout_free(&f->layout); ir_graph_free(&f->graph); }
+static void fx_free(Fx *f) { reuse_analysis_free(&f->ra); sram_layout_free(&f->layout); ir_graph_free(&f->graph); }
 
 static void check_vector(Fx *f, const int16_t *re, const int16_t *im, const char *name) {
     Candidate c;

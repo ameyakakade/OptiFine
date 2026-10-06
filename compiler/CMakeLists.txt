@@ -62,7 +62,7 @@ add_library(optifine_core STATIC
     src/codegen/lower_requantize.c
     src/codegen/periodic.c
     src/codegen/program.c
-    src/codegen/regalloc.c
+    src/codegen/reuse_analysis.c
     src/codegen/registers.c
     src/codegen/select.c
     src/codegen/sram_layout.c

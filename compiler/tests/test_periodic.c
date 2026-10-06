@@ -21,14 +21,14 @@
  * the generated BODY a small, valid AVR fixture whose expected bytes do not
  * depend on the classifier lowering implementation. */
 int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
-                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const ReuseAnalysis *reuse, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
     (void)unit;
     (void)graph;
     (void)layout;
-    (void)regalloc;
+    (void)reuse;
     (void)cost_model;
     (void)demo_input;
     (void)demo_input_len;
@@ -49,14 +49,14 @@ int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model
 }
 
 int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
-                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const ReuseAnalysis *reuse, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
     (void)unit;
     (void)graph;
     (void)layout;
-    (void)regalloc;
+    (void)reuse;
     (void)cost_model;
     (void)demo_input;
     (void)demo_input_len;
@@ -80,7 +80,7 @@ typedef struct {
     size_t output_shape;
     uint16_t output_addr;
     SramLayout layout;
-    RegAllocResult regalloc;
+    ReuseAnalysis reuse;
     CostModel cost_model;
     PeriodicOptions options;
 } PeriodicFixture;
@@ -126,7 +126,7 @@ static char *emit_periodic(WaitPolicy policy, PeriodicProgramCost *cost) {
     FILE *out = tmpfile();
     TEST_CHECK(out != NULL);
     TEST_CHECK(codegen_emit_periodic_program(&fixture.graph, &fixture.layout,
-                                         &fixture.regalloc, &fixture.cost_model,
+                                         &fixture.reuse, &fixture.cost_model,
                                          NULL, 0, &fixture.options, out, cost) == 0);
     char *text = read_stream(out);
     fclose(out);

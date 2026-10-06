@@ -25,7 +25,7 @@
 #include "optifine/codegen/lower.h"
 #include "optifine/codegen/periodic.h"
 #include "optifine/codegen/program.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -104,7 +104,7 @@ static void host_pipeline(const int16_t *x, const int16_t *coeff, Ref *r) {
 typedef struct {
     IrGraph graph;
     SramLayout layout;
-    RegAllocResult ra;
+    ReuseAnalysis ra;
     size_t op_of[16];            /* op id by role, see ROLE_* */
     int n_ops;
 } Fx;
@@ -115,7 +115,7 @@ enum { ROLE_INPUT, ROLE_CONST, ROLE_WINDOW, ROLE_BITREV, ROLE_FFT0, ROLE_MAG = R
 static void fx_init(Fx *f) {
     assert(dsp_build_pipeline(&f->graph) == 0);
     assert(sram_layout_build(&f->graph, &f->layout) == 0);
-    assert(regalloc_next_use(&f->graph, &f->ra) == 0);
+    assert(reuse_analyze(&f->graph, &f->ra) == 0);
     /* The emitted operation order the rest of the test assumes, read from
      * the graph: ids ascend in exactly this role order. */
     static const OpKind kinds[ROLE_COUNT] = {OP_INPUT, OP_CONST, OP_WINDOW, OP_BIT_REVERSE,
@@ -127,7 +127,7 @@ static void fx_init(Fx *f) {
         f->op_of[r] = (size_t)r;
     }
 }
-static void fx_free(Fx *f) { regalloc_result_free(&f->ra); sram_layout_free(&f->layout); ir_graph_free(&f->graph); }
+static void fx_free(Fx *f) { reuse_analysis_free(&f->ra); sram_layout_free(&f->layout); ir_graph_free(&f->graph); }
 static uint16_t addr_of(const Fx *f, int role) { return sram_layout_addr(&f->layout, &f->graph, f->op_of[role], 0); }
 
 /* The production candidates, in emission order: zero-register init, the

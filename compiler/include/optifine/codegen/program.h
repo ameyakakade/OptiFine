@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/emit.h"
@@ -33,7 +33,7 @@ typedef struct {
  * followed by OP_INPUT and OP_CONST operations. It does not emit complete-
  * program wrapper or termination instructions. */
 int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
-                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const ReuseAnalysis *reuse, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost);
@@ -45,7 +45,7 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
  * Both take the EmitUnit of the .s file being written, so labels stay unique
  * when a caller emits the two regions into one program (see emit.h). */
 int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
-                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const ReuseAnalysis *reuse, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost);
@@ -60,7 +60,7 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
  * returns (active-mode optimization). Returns 0 on success, non-zero (with an error
  * already printed to stderr) if any op fails to lower. */
 int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
-                          const RegAllocResult *regalloc, const CostModel *cost_model,
+                          const ReuseAnalysis *reuse, const CostModel *cost_model,
                           const int8_t *demo_input, size_t demo_input_len,
                           int use_real_candidates,
                           FILE *out, ProgramCost *out_cost);
@@ -90,7 +90,7 @@ typedef struct {
 } DspProgramCost;
 
 int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
-                             const RegAllocResult *regalloc, const CostModel *cost_model,
+                             const ReuseAnalysis *reuse, const CostModel *cost_model,
                              const int8_t *input_bytes, size_t input_len,
                              FILE *out, DspProgramCost *out_cost);
 

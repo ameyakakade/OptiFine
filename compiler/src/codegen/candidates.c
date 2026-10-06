@@ -15,7 +15,7 @@ void candidate_free(Candidate *candidate) {
 
 /* Candidate 2 for OP_MATMUL: pre-loads the reused activation input
  * (inputs[0], read once per output channel -- N times total, see
- * regalloc.h's next-use analysis) into free registers ONCE, then reuses
+ * reuse_analysis.h) into free registers ONCE, then reuses
  * it via `mov` (1 cycle) instead of re-`lds`-ing it from SRAM (2 cycles)
  * on every one of the N output channels that need it. This is the
  * dominant redundancy in the naive baseline (lower_ml.c's
@@ -113,7 +113,7 @@ static int lower_matmul_cached(const IrGraph *graph, size_t op_id, const SramLay
 }
 
 size_t candidates_generate(const IrGraph *graph, size_t op_id,
-                            const SramLayout *layout, const RegAllocResult *regalloc,
+                            const SramLayout *layout, const ReuseAnalysis *reuse,
                             const CostModel *cost_model,
                             const int8_t *demo_input, size_t demo_input_len,
                             Candidate *out_candidates, size_t max_candidates) {
@@ -125,19 +125,19 @@ size_t candidates_generate(const IrGraph *graph, size_t op_id,
     /* Candidate 1: the existing, always-correct spill lowering (every
      * value reloaded from SRAM per use) -- the naive baseline, and always
      * a valid fallback for every OpKind. */
-    if (lower_op(graph, op_id, layout, regalloc, cost_model, demo_input, demo_input_len, &out_candidates[n]) != 0) {
+    if (lower_op(graph, op_id, layout, reuse, cost_model, demo_input, demo_input_len, &out_candidates[n]) != 0) {
         fprintf(stderr, "candidates_generate: op %zu failed to lower\n", op_id);
         return 0;
     }
     n++;
 
-    /* Candidate 2: only for OP_MATMUL, only when regalloc's next-use
-     * analysis marked this op's activation input as worth caching (see
-     * regalloc.h) -- true for every MatMul in this project's graphs,
-     * since every MatMul has more than one output channel. */
+    /* Candidate 2: only for OP_MATMUL, only when the reuse analysis marked
+     * its activation input as reused (reuse_analysis.h) -- true for every
+     * MatMul in this project's graphs, since every MatMul has more than one
+     * output channel. */
     if (n < max_candidates && graph->ops[op_id].kind == OP_MATMUL) {
         size_t activation_id = graph->ops[op_id].inputs[0];
-        if (regalloc->assignment[activation_id] == 1) {
+        if (reuse->reused[activation_id] == 1) {
             if (lower_matmul_cached(graph, op_id, layout, cost_model, &out_candidates[n]) == 0) {
                 n++;
             }

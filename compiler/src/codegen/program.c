@@ -35,20 +35,20 @@ static int emit_best(Candidate *candidates, size_t count, EmitUnit *unit, FILE *
 #define PROGRAM_MAX_CANDIDATES 4
 
 static int lower_one(const IrGraph *graph, size_t op_id, const SramLayout *layout,
-                      const RegAllocResult *regalloc, const CostModel *cost_model,
+                      const ReuseAnalysis *reuse, const CostModel *cost_model,
                       const int8_t *demo_input, size_t demo_input_len,
                       int use_real_candidates, EmitUnit *unit, FILE *out,
                       double *energy_acc, uint32_t *cycles_acc) {
     if (!use_real_candidates) {
         Candidate c;
-        if (lower_op(graph, op_id, layout, regalloc, cost_model, demo_input, demo_input_len, &c) != 0) {
+        if (lower_op(graph, op_id, layout, reuse, cost_model, demo_input, demo_input_len, &c) != 0) {
             return -1;
         }
         return emit_best(&c, 1, unit, out, energy_acc, cycles_acc);
     }
 
     Candidate candidates[PROGRAM_MAX_CANDIDATES];
-    size_t count = candidates_generate(graph, op_id, layout, regalloc, cost_model,
+    size_t count = candidates_generate(graph, op_id, layout, reuse, cost_model,
                                         demo_input, demo_input_len,
                                         candidates, PROGRAM_MAX_CANDIDATES);
     if (count == 0) {
@@ -58,7 +58,7 @@ static int lower_one(const IrGraph *graph, size_t op_id, const SramLayout *layou
 }
 
 int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
-                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const ReuseAnalysis *reuse, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
@@ -76,7 +76,7 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
     for (size_t i = 0; i < graph->count; i++) {
         int is_prologue = (graph->ops[i].kind == OP_INPUT || graph->ops[i].kind == OP_CONST);
         if (is_prologue) {
-            if (lower_one(graph, i, layout, regalloc, cost_model, demo_input, demo_input_len,
+            if (lower_one(graph, i, layout, reuse, cost_model, demo_input, demo_input_len,
                           use_real_candidates, unit, out,
                           &out_cost->energy_nj, &out_cost->cycles) != 0) {
                 fprintf(stderr, "codegen_emit_initialization: failed to lower op %zu\n", i);
@@ -88,7 +88,7 @@ int codegen_emit_initialization(const IrGraph *graph, const SramLayout *layout,
 }
 
 int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
-                                const RegAllocResult *regalloc, const CostModel *cost_model,
+                                const ReuseAnalysis *reuse, const CostModel *cost_model,
                                 const int8_t *demo_input, size_t demo_input_len,
                                 int use_real_candidates,
                                 EmitUnit *unit, FILE *out, ProgramRegionCost *out_cost) {
@@ -103,7 +103,7 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
                 fprintf(out, "\n    ; ---- inference begins here ----\n");
                 boundary_written = 1;
             }
-            if (lower_one(graph, i, layout, regalloc, cost_model, demo_input, demo_input_len,
+            if (lower_one(graph, i, layout, reuse, cost_model, demo_input, demo_input_len,
                           use_real_candidates, unit, out,
                           &out_cost->energy_nj, &out_cost->cycles) != 0) {
                 fprintf(stderr, "codegen_emit_inference_body: failed to lower op %zu\n", i);
@@ -116,7 +116,7 @@ int codegen_emit_inference_body(const IrGraph *graph, const SramLayout *layout,
 }
 
 int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
-                          const RegAllocResult *regalloc, const CostModel *cost_model,
+                          const ReuseAnalysis *reuse, const CostModel *cost_model,
                           const int8_t *demo_input, size_t demo_input_len,
                           int use_real_candidates,
                           FILE *out, ProgramCost *out_cost) {
@@ -131,12 +131,12 @@ int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
     EmitUnit unit;
     emit_unit_init(&unit);
     emit_program_prologue(out);
-    if (codegen_emit_initialization(graph, layout, regalloc, cost_model,
+    if (codegen_emit_initialization(graph, layout, reuse, cost_model,
                                     demo_input, demo_input_len, use_real_candidates,
                                     &unit, out, &initialization) != 0) {
         return -1;
     }
-    if (codegen_emit_inference_body(graph, layout, regalloc, cost_model,
+    if (codegen_emit_inference_body(graph, layout, reuse, cost_model,
                                     demo_input, demo_input_len, use_real_candidates,
                                     &unit, out, &inference_body) != 0) {
         return -1;
@@ -167,7 +167,7 @@ int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model
 }
 
 int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
-                             const RegAllocResult *regalloc, const CostModel *cost_model,
+                             const ReuseAnalysis *reuse, const CostModel *cost_model,
                              const int8_t *input_bytes, size_t input_len,
                              FILE *out, DspProgramCost *out_cost) {
     ProgramRegionCost zero = {0};
@@ -178,11 +178,11 @@ int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
     EmitUnit unit;
     emit_unit_init(&unit);
     emit_program_prologue(out);
-    if (codegen_emit_initialization(graph, layout, regalloc, cost_model, input_bytes, input_len, 0,
+    if (codegen_emit_initialization(graph, layout, reuse, cost_model, input_bytes, input_len, 0,
                                     &unit, out, &out_cost->initialization) != 0) {
         return -1;
     }
-    if (codegen_emit_inference_body(graph, layout, regalloc, cost_model, input_bytes, input_len, 0,
+    if (codegen_emit_inference_body(graph, layout, reuse, cost_model, input_bytes, input_len, 0,
                                     &unit, out, &out_cost->body) != 0) {
         return -1;
     }

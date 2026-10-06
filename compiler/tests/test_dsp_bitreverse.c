@@ -12,7 +12,7 @@
 #include <string.h>
 
 #include "optifine/codegen/lower.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -64,19 +64,19 @@ static void test_permutation_is_a_bijection(void) {
 
 /* --- shared harness ---------------------------------------------------- */
 typedef struct {
-    IrGraph graph; SramLayout layout; RegAllocResult regalloc;
+    IrGraph graph; SramLayout layout; ReuseAnalysis reuse;
     uint16_t in_addr, out_addr;
 } Fixture;
 
 static void fixture_init(Fixture *f) {
     assert(dsp_build_pipeline(&f->graph) == 0);
     assert(sram_layout_build(&f->graph, &f->layout) == 0);
-    assert(regalloc_next_use(&f->graph, &f->regalloc) == 0);
+    assert(reuse_analyze(&f->graph, &f->reuse) == 0);
     f->in_addr = sram_layout_addr(&f->layout, &f->graph, WINDOW_OP, 0);
     f->out_addr = sram_layout_addr(&f->layout, &f->graph, BITREV_OP, 0);
 }
 static void fixture_free(Fixture *f) {
-    regalloc_result_free(&f->regalloc); sram_layout_free(&f->layout); ir_graph_free(&f->graph);
+    reuse_analysis_free(&f->reuse); sram_layout_free(&f->layout); ir_graph_free(&f->graph);
 }
 
 /* Seeds the window output, runs BitReverse, returns the candidate. */
@@ -86,7 +86,7 @@ static void run_bitreverse(Fixture *f, const int16_t *samples, AvrInterp *in, Ca
         in->mem[f->in_addr + i * 2]     = (uint8_t)((uint16_t)samples[i] & 0xFF);
         in->mem[f->in_addr + i * 2 + 1] = (uint8_t)(((uint16_t)samples[i] >> 8) & 0xFF);
     }
-    assert(lower_op(&f->graph, BITREV_OP, &f->layout, &f->regalloc, &g_cm, NULL, 0, c) == 0);
+    assert(lower_op(&f->graph, BITREV_OP, &f->layout, &f->reuse, &g_cm, NULL, 0, c) == 0);
     assert(avr_interp_run(in, c) == 0);
 }
 
@@ -163,7 +163,7 @@ static void test_touches_nothing_outside_its_regions(void) {
         in.mem[f.in_addr + i*2] = (uint8_t)((uint16_t)s[i] & 0xFF);
         in.mem[f.in_addr + i*2+1] = (uint8_t)(((uint16_t)s[i] >> 8) & 0xFF);
     }
-    assert(lower_op(&f.graph, BITREV_OP, &f.layout, &f.regalloc, &g_cm, NULL, 0, &c) == 0);
+    assert(lower_op(&f.graph, BITREV_OP, &f.layout, &f.reuse, &g_cm, NULL, 0, &c) == 0);
     assert(avr_interp_run(&in, &c) == 0);
 
     size_t out_lo = f.out_addr, out_hi = f.out_addr + DSP_FFT_SIZE * 4;

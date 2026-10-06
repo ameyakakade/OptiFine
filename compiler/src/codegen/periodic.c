@@ -90,7 +90,7 @@ static int periodic_output_addr(const IrGraph *graph, const SramLayout *layout,
 }
 
 int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout,
-                                  const RegAllocResult *regalloc, const CostModel *cost_model,
+                                  const ReuseAnalysis *reuse, const CostModel *cost_model,
                                   const int8_t *demo_input, size_t demo_input_len,
                                   const PeriodicOptions *options,
                                   FILE *out, PeriodicProgramCost *out_cost) {
@@ -119,7 +119,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
         return 0;
     }
 
-    if (regalloc == NULL || cost_model == NULL) {
+    if (reuse == NULL || cost_model == NULL) {
         return -1;
     }
 
@@ -163,7 +163,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
     /* One .s file, so one label namespace across both emitted regions. */
     EmitUnit unit;
     emit_unit_init(&unit);
-    if (codegen_emit_initialization(graph, layout, regalloc, cost_model,
+    if (codegen_emit_initialization(graph, layout, reuse, cost_model,
                                     demo_input, demo_input_len,
                                     options->use_real_candidates,
                                     &unit, out, &out_cost->initialization) != 0) {
@@ -227,7 +227,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
         return -1;
     }
 
-    if (codegen_emit_inference_body(graph, layout, regalloc, cost_model,
+    if (codegen_emit_inference_body(graph, layout, reuse, cost_model,
                                     demo_input, demo_input_len,
                                     options->use_real_candidates,
                                     &unit, out, &out_cost->inference) != 0) {

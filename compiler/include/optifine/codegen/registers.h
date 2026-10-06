@@ -1,7 +1,7 @@
-/* Shared AVR register assignments for this project's codegen. These are
- * intra-op scratch registers, live only within one op's own lowering --
- * NOT what regalloc.c's assignment[] represents (see regalloc.h). r2 is
- * the one exception: it is a program-global always-zero register (see
+/* Fixed AVR register contracts for this project's codegen. These are
+ * intra-op scratch registers, live only within one op's own lowering; no
+ * value stays in a register across an op boundary (reuse_analysis.h says why
+ * there is no allocator). r2 is the one exception: it is a program-global always-zero register (see
  * lower_init_zero_reg in lower.h). */
 #ifndef OPTIFINE_CODEGEN_REGISTERS_H
 #define OPTIFINE_CODEGEN_REGISTERS_H
@@ -26,8 +26,7 @@
  * REG_ACC0-3, REG_SIGN0/1, r0/r1) -- safe to repurpose as extra storage
  * for the duration of one MatMul's own execution only (this is a
  * within-one-op register cache, not cross-op residency across the whole
- * program -- see regalloc.h's module comment for why the latter isn't
- * attempted):
+ * program -- see reuse_analysis.h for why the latter isn't attempted):
  *   - r9-r15, r26-r31: unused by any ML lowering.
  *   - r24/r25 (REG_SCRATCH0/1): used by lower_bytes/lower_output/
  *     lower_requantize_element, but never by lower_matmul.

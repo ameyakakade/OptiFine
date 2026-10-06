@@ -8,7 +8,7 @@
 #include "optifine/codegen/lower.h"
 #include "optifine/codegen/periodic.h"
 #include "optifine/codegen/program.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -181,8 +181,8 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
         ir_graph_free(&graph);
         return 1;
     }
-    RegAllocResult regalloc;
-    if (regalloc_next_use(&graph, &regalloc) != 0) {
+    ReuseAnalysis reuse;
+    if (reuse_analyze(&graph, &reuse) != 0) {
         fprintf(stderr, "out of memory in reuse analysis\n");
         free(input);
         sram_layout_free(&layout);
@@ -198,7 +198,7 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
         /* Periodic scheduling: the same DSP initialization and body inside the periodic
          * wrapper the ML path uses. */
         PeriodicProgramCost cost;
-        rc = codegen_emit_periodic_program(&graph, &layout, &regalloc, &cost_model, input, input_len,
+        rc = codegen_emit_periodic_program(&graph, &layout, &reuse, &cost_model, input, input_len,
                                            periodic, out, &cost);
         fclose(out);
         if (rc == 0) {
@@ -206,7 +206,7 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
         }
     } else {
         DspProgramCost cost;
-        rc = codegen_emit_dsp_program(&graph, &layout, &regalloc, &cost_model, input, input_len, out, &cost);
+        rc = codegen_emit_dsp_program(&graph, &layout, &reuse, &cost_model, input, input_len, out, &cost);
         fclose(out);
         if (rc == 0) {
             uint32_t total = cost.initialization.cycles + cost.body.cycles + cost.termination.cycles;
@@ -224,7 +224,7 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
         }
     }
     free(input);
-    regalloc_result_free(&regalloc);
+    reuse_analysis_free(&reuse);
     sram_layout_free(&layout);
     ir_graph_free(&graph);
     return rc == 0 ? 0 : 1;
@@ -370,11 +370,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    RegAllocResult regalloc;
-    /* Real next-use analysis (see regalloc.h) -- only meaningfully consulted
-     * when --optimized routes through candidates_generate; the naive path
-     * (lower_op) ignores it and always spills, as the naive baseline does. */
-    if (regalloc_next_use(&graph, &regalloc) != 0) {
+    ReuseAnalysis reuse;
+    /* Consulted only when --optimized routes through candidates_generate;
+     * the naive path (lower_op) ignores it (reuse_analysis.h). */
+    if (reuse_analyze(&graph, &reuse) != 0) {
         fprintf(stderr, "out of memory in reuse analysis\n");
         free(demo_input);
         sram_layout_free(&layout);
@@ -386,7 +385,7 @@ int main(int argc, char **argv) {
     if (!out) {
         fprintf(stderr, "failed to open output file: %s\n", out_path);
         free(demo_input);
-        regalloc_result_free(&regalloc);
+        reuse_analysis_free(&reuse);
         sram_layout_free(&layout);
         ir_graph_free(&graph);
         return 1;
@@ -396,11 +395,11 @@ int main(int argc, char **argv) {
     ProgramCost cost;
     PeriodicProgramCost periodic_cost;
     if (periodic_mode) {
-        rc = codegen_emit_periodic_program(&graph, &layout, &regalloc, &cost_model,
+        rc = codegen_emit_periodic_program(&graph, &layout, &reuse, &cost_model,
                                            demo_input, demo_input_len, &periodic_options,
                                            out, &periodic_cost);
     } else {
-        rc = codegen_emit_program(&graph, &layout, &regalloc, &cost_model,
+        rc = codegen_emit_program(&graph, &layout, &reuse, &cost_model,
                                   demo_input, demo_input_len, use_real_candidates, out, &cost);
     }
     fclose(out);
@@ -418,7 +417,7 @@ int main(int argc, char **argv) {
     }
 
     free(demo_input);
-    regalloc_result_free(&regalloc);
+    reuse_analysis_free(&reuse);
     sram_layout_free(&layout);
     ir_graph_free(&graph);
     return rc == 0 ? 0 : 1;

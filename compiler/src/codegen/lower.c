@@ -86,17 +86,15 @@ static void lower_output(InstrBuf *buf, const IrGraph *graph, const SramLayout *
 /* ---------------------------------------------------------------------- */
 
 int lower_op(const IrGraph *graph, size_t op_id,
-             const SramLayout *layout, const RegAllocResult *regalloc,
+             const SramLayout *layout, const ReuseAnalysis *reuse,
              const CostModel *cost_model,
              const int8_t *demo_input, size_t demo_input_len,
              Candidate *out) {
-    /* lower_op always spills its own op's output to SRAM unconditionally
-     * -- `regalloc` is accepted for interface symmetry with
-     * candidates_generate, but a value's own regalloc->assignment doesn't
-     * change how it stores itself; it's consumer-side information (see
-     * regalloc.h) that codegen/candidates.c's cached-input MatMul
-     * candidate reads instead, for ops it consumes. */
-    (void)regalloc;
+    /* The naive lowering ignores the reuse analysis: every op reads its
+     * inputs from SRAM on each use and stores its output to SRAM. `reuse`
+     * is accepted only so lower_op and candidates_generate share one
+     * signature; candidates.c's cached-input MatMul is its sole reader. */
+    (void)reuse;
 
     const IrOp *op = &graph->ops[op_id];
     InstrBuf buf;

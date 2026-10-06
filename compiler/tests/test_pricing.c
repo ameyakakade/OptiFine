@@ -14,7 +14,7 @@
 
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/lower.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -33,9 +33,9 @@ static const char *kEmitted[] = {
 static void price_graph(const IrGraph *g, const CostModel *cm, const int8_t *input, size_t input_len,
                         uint32_t *cycles, double *energy) {
     SramLayout layout;
-    RegAllocResult reuse;
+    ReuseAnalysis reuse;
     assert(sram_layout_build(g, &layout) == 0);
-    assert(regalloc_next_use(g, &reuse) == 0);
+    assert(reuse_analyze(g, &reuse) == 0);
     for (size_t i = 0; i < g->count; i++) {
         Candidate c;
         assert(lower_op(g, i, &layout, &reuse, cm, input, input_len, &c) == 0);
@@ -43,7 +43,7 @@ static void price_graph(const IrGraph *g, const CostModel *cm, const int8_t *inp
         energy[i] = c.energy_nj;
         candidate_free(&c);
     }
-    regalloc_result_free(&reuse);
+    reuse_analysis_free(&reuse);
     sram_layout_free(&layout);
 }
 

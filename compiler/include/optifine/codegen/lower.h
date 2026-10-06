@@ -2,8 +2,10 @@
  * (Input, Const, MatMul, Add, Relu, Requantize, Output -- the naive
  * baseline) and the DSP path (Window, BitReverse, FftButterfly, Magnitude,
  * PeakExtract, with counted loops). lower_op always produces exactly one real,
- * correct candidate per op, using regalloc's always-spill assignment;
- * candidates.c adds its register-resident alternatives for ML ops. */
+ * correct candidate per op, reading every input from SRAM and storing every
+ * output to SRAM; it does not consult the reuse analysis. candidates.c adds
+ * the one register-caching alternative (MatMul). The graph must have passed
+ * ir_verify. */
 #ifndef OPTIFINE_CODEGEN_LOWER_H
 #define OPTIFINE_CODEGEN_LOWER_H
 
@@ -11,7 +13,7 @@
 #include <stdint.h>
 
 #include "optifine/codegen/candidates.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
@@ -37,20 +39,20 @@ int lower_init_zero_reg(const CostModel *cost_model, Candidate *out);
  * MinMax-calibrated per-tensor quantization on unbounded-support inputs). */
 int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_input, size_t demo_input_len);
 
-/* Lowers a single IrOp (graph->ops[op_id]) into exactly one naive, correct
- * Candidate. `regalloc` is consulted (the naive path always takes the SRAM-spill
- * branch, regalloc->assignment[op_id] == -1 -- asserted, not silently
- * assumed). `demo_input`/`demo_input_len` are only read when
- * graph->ops[op_id].kind == OP_INPUT.
+/* Lowers a single IrOp (graph->ops[op_id]) of a verified graph into exactly
+ * one naive, correct Candidate. `reuse` is accepted for signature symmetry
+ * with candidates_generate and ignored. `demo_input`/`demo_input_len` are
+ * only read when graph->ops[op_id].kind == OP_INPUT.
  *
  * Returns 0 on success. Returns non-zero (with an error already printed to
- * stderr) for: an OpKind with no lowering, a DSP op whose tensor shapes or
- * dtypes are not the ones its lowering handles, or a Requantize op whose compile-time-verified worst-case output would
- * overflow int8 range given the model's real weight/bias magnitudes (see
- * lower_requantize.c's compute_fixed_multiplier -- this project does not saturate at
- * runtime, it refuses to compile instead). */
+ * stderr) when the embedded input's length does not match the Input tensor,
+ * a Requantize scale ratio has no supported fixed-point multiplier (its shift
+ * would fall outside [0, 40], lower_requantize.c), PeakExtract's selected[]
+ * does not fit the DSP scratch arena, or memory runs out. Whether a
+ * Requantize output fits int8 is not decided here: it is checked once, for
+ * the one embedded input, by lower_verify_demo_forward_pass. */
 int lower_op(const IrGraph *graph, size_t op_id,
-             const SramLayout *layout, const RegAllocResult *regalloc,
+             const SramLayout *layout, const ReuseAnalysis *reuse,
              const CostModel *cost_model,
              const int8_t *demo_input, size_t demo_input_len,
              Candidate *out);

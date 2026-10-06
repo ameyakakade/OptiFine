@@ -6,7 +6,7 @@
 
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/lower.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -90,8 +90,8 @@ static void test_lower_window_op(void) {
     assert(dsp_build_pipeline(&graph) == 0);
     SramLayout layout;
     assert(sram_layout_build(&graph, &layout) == 0);
-    RegAllocResult regalloc;
-    assert(regalloc_next_use(&graph, &regalloc) == 0);
+    ReuseAnalysis reuse;
+    assert(reuse_analyze(&graph, &reuse) == 0);
 
     /* raw_input = op 0; write a known Q15 signal (all 0.25) directly into
      * its SRAM slot via a real lower_op(OP_INPUT) call, matching how the
@@ -108,20 +108,20 @@ static void test_lower_window_op(void) {
     candidate_free(&zero_init);
 
     Candidate input_c;
-    assert(lower_op(&graph, 0, &layout, &regalloc, &cost_model,
+    assert(lower_op(&graph, 0, &layout, &reuse, &cost_model,
                      (const int8_t *)signal, sizeof(signal), &input_c) == 0);
     assert_priced(&input_c);
     assert(avr_interp_run(&interp, &input_c) == 0);
     candidate_free(&input_c);
 
     Candidate const_c;
-    assert(lower_op(&graph, 1, &layout, &regalloc, &cost_model, NULL, 0, &const_c) == 0);
+    assert(lower_op(&graph, 1, &layout, &reuse, &cost_model, NULL, 0, &const_c) == 0);
     assert_priced(&const_c);
     assert(avr_interp_run(&interp, &const_c) == 0);
     candidate_free(&const_c);
 
     Candidate window_c;
-    assert(lower_op(&graph, 2, &layout, &regalloc, &cost_model, NULL, 0, &window_c) == 0);
+    assert(lower_op(&graph, 2, &layout, &reuse, &cost_model, NULL, 0, &window_c) == 0);
     assert_priced(&window_c);
     assert(avr_interp_run(&interp, &window_c) == 0);
 
@@ -138,7 +138,7 @@ static void test_lower_window_op(void) {
     }
 
     candidate_free(&window_c);
-    regalloc_result_free(&regalloc);
+    reuse_analysis_free(&reuse);
     sram_layout_free(&layout);
     ir_graph_free(&graph);
 }
@@ -155,8 +155,8 @@ static void test_lower_output_copies_full_q15_width(void) {
     assert(dsp_build_pipeline(&graph) == 0);
     SramLayout layout;
     assert(sram_layout_build(&graph, &layout) == 0);
-    RegAllocResult regalloc;
-    assert(regalloc_next_use(&graph, &regalloc) == 0);
+    ReuseAnalysis reuse;
+    assert(reuse_analyze(&graph, &reuse) == 0);
 
     size_t out_id = graph.count - 1;
     assert(graph.ops[out_id].kind == OP_OUTPUT);
@@ -166,13 +166,13 @@ static void test_lower_output_copies_full_q15_width(void) {
     assert(want_bytes == DSP_MAX_PEAKS * 2);
 
     Candidate c;
-    assert(lower_op(&graph, out_id, &layout, &regalloc, &cost_model, NULL, 0, &c) == 0);
+    assert(lower_op(&graph, out_id, &layout, &reuse, &cost_model, NULL, 0, &c) == 0);
     assert_priced(&c);
     /* one lds + one sts per byte copied */
     assert(c.num_instructions == want_bytes * 2);
 
     candidate_free(&c);
-    regalloc_result_free(&regalloc);
+    reuse_analysis_free(&reuse);
     sram_layout_free(&layout);
     ir_graph_free(&graph);
 }

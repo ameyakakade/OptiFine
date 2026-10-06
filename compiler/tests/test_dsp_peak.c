@@ -21,7 +21,7 @@
 
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/lower.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/registers.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
@@ -94,7 +94,7 @@ static uint16_t host_mag(int16_t re, int16_t im) {
 typedef struct {
     IrGraph graph;
     SramLayout layout;
-    RegAllocResult ra;
+    ReuseAnalysis ra;
     size_t bitrev_op, fft5_op, mag_op, pk_op;
     uint16_t bitrev_addr, fft5_addr, mag_addr, pk_addr, sel_addr;
     Candidate pk, mag;
@@ -103,7 +103,7 @@ typedef struct {
 static void fx_init(Fx *f) {
     assert(dsp_build_pipeline(&f->graph) == 0);
     assert(sram_layout_build(&f->graph, &f->layout) == 0);
-    assert(regalloc_next_use(&f->graph, &f->ra) == 0);
+    assert(reuse_analyze(&f->graph, &f->ra) == 0);
     for (size_t i = 0; i < f->graph.count; i++) {
         OpKind k = f->graph.ops[i].kind;
         if (k == OP_BIT_REVERSE) f->bitrev_op = i;
@@ -133,7 +133,7 @@ static void fx_init(Fx *f) {
 static void fx_free(Fx *f) {
     candidate_free(&f->pk);
     candidate_free(&f->mag);
-    regalloc_result_free(&f->ra);
+    reuse_analysis_free(&f->ra);
     sram_layout_free(&f->layout);
     ir_graph_free(&f->graph);
 }

@@ -19,7 +19,7 @@
 
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/lower.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/dsp_build.h"
@@ -43,8 +43,8 @@ static void build_unit(Unit *u) {
     assert(dsp_build_pipeline(&g) == 0);
     SramLayout l;
     assert(sram_layout_build(&g, &l) == 0);
-    RegAllocResult ra;
-    assert(regalloc_next_use(&g, &ra) == 0);
+    ReuseAnalysis ra;
+    assert(reuse_analyze(&g, &ra) == 0);
     u->count = 0;
     u->cycles = 0;
     for (size_t i = 0; i < g.count; i++) {
@@ -64,7 +64,7 @@ static void build_unit(Unit *u) {
     u->names[u->count] = "break + table";
     u->cycles += u->parts[u->count].cycles;
     u->count++;
-    regalloc_result_free(&ra);
+    reuse_analysis_free(&ra);
     sram_layout_free(&l);
     ir_graph_free(&g);
 }
@@ -204,8 +204,8 @@ static void test_scratch_is_op_local(void) {
     assert(dsp_build_pipeline(&g) == 0);
     SramLayout l;
     assert(sram_layout_build(&g, &l) == 0);
-    RegAllocResult ra;
-    assert(regalloc_next_use(&g, &ra) == 0);
+    ReuseAnalysis ra;
+    assert(reuse_analyze(&g, &ra) == 0);
     uint32_t lo = l.dsp_scratch_addr, hi = lo + DSP_SCRATCH_BYTES;
     int ops = 0;
     for (size_t i = 0; i < g.count; i++) {
@@ -254,7 +254,7 @@ static void test_scratch_is_op_local(void) {
         ops++;
     }
     assert(ops == 10);
-    regalloc_result_free(&ra);
+    reuse_analysis_free(&ra);
     sram_layout_free(&l);
     ir_graph_free(&g);
 }

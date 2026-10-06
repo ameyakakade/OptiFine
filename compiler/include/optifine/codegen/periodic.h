@@ -32,7 +32,7 @@ int periodic_options_validate(const PeriodicOptions *options);
  * the tensor layout, and emits the matched busy-wait/Power-save AVR
  * wrapper. */
 int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout,
-                                  const RegAllocResult *regalloc, const CostModel *cost_model,
+                                  const ReuseAnalysis *reuse, const CostModel *cost_model,
                                   const int8_t *demo_input, size_t demo_input_len,
                                   const PeriodicOptions *options,
                                   FILE *out, PeriodicProgramCost *out_cost);

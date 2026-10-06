@@ -1,8 +1,8 @@
-/* Deterministic SRAM address allocation for the naive ML codegen
- * (compiler/src/codegen/lower*.c). regalloc_next_use always reports every
- * op's output value as spilled (-1, see regalloc.c) -- this module decides
- * *where* each spilled value lives in SRAM: one contiguous slot per op, in
- * ascending op id order. */
+/* Deterministic SRAM placement of the workload graph's tensors: every op's
+ * output lives in SRAM (no value stays in a register across ops, see
+ * reuse_analysis.h), and this module decides where -- one contiguous slot per
+ * op, in ascending op id order, then the DSP scratch arena. It is the one
+ * address-assignment strategy the backend has for workload tensors. */
 #ifndef OPTIFINE_CODEGEN_SRAM_LAYOUT_H
 #define OPTIFINE_CODEGEN_SRAM_LAYOUT_H
 

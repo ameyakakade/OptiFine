@@ -20,7 +20,7 @@
 
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/codegen/lower.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/registers.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
@@ -87,7 +87,7 @@ static void host_fft(const Buf *natural, Buf *out) {
 typedef struct {
     IrGraph graph;
     SramLayout layout;
-    RegAllocResult ra;
+    ReuseAnalysis ra;
     size_t window_op, coeff_op, bitrev_op, fft5_op, mag_op;
     uint16_t bitrev_addr, fft5_addr, mag_addr;
     Candidate mag;          /* lower_op(OP_MAGNITUDE), the real path */
@@ -96,7 +96,7 @@ typedef struct {
 static void fx_init(Fx *f) {
     assert(dsp_build_pipeline(&f->graph) == 0);
     assert(sram_layout_build(&f->graph, &f->layout) == 0);
-    assert(regalloc_next_use(&f->graph, &f->ra) == 0);
+    assert(reuse_analyze(&f->graph, &f->ra) == 0);
     f->window_op = f->coeff_op = f->bitrev_op = f->fft5_op = f->mag_op = (size_t)-1;
     for (size_t i = 0; i < f->graph.count; i++) {
         const IrOp *op = &f->graph.ops[i];
@@ -119,7 +119,7 @@ static void fx_init(Fx *f) {
 }
 static void fx_free(Fx *f) {
     candidate_free(&f->mag);
-    regalloc_result_free(&f->ra);
+    reuse_analysis_free(&f->ra);
     sram_layout_free(&f->layout);
     ir_graph_free(&f->graph);
 }

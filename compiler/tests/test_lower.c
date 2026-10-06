@@ -8,7 +8,7 @@
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/lower.h"
 #include "optifine/codegen/program.h"
-#include "optifine/codegen/regalloc.h"
+#include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/select.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
@@ -88,7 +88,7 @@ static char *read_stream(FILE *stream) {
 /* Catches an accidental return to a monolithic emitter, or a periodic
  * wrapper leaking standalone-only boilerplate into either reusable region. */
 static void assert_reusable_classifier_regions(const IrGraph *graph, const SramLayout *layout,
-                                                const RegAllocResult *regalloc,
+                                                const ReuseAnalysis *reuse,
                                                 const CostModel *cost_model,
                                                 const int8_t *demo_input,
                                                 size_t demo_input_len) {
@@ -101,10 +101,10 @@ static void assert_reusable_classifier_regions(const IrGraph *graph, const SramL
     ProgramRegionCost body = {0};
     EmitUnit unit;
     emit_unit_init(&unit);
-    assert(codegen_emit_initialization(graph, layout, regalloc, cost_model,
+    assert(codegen_emit_initialization(graph, layout, reuse, cost_model,
                                        demo_input, demo_input_len, 1,
                                        &unit, init_out, &init) == 0);
-    assert(codegen_emit_inference_body(graph, layout, regalloc, cost_model,
+    assert(codegen_emit_inference_body(graph, layout, reuse, cost_model,
                                        demo_input, demo_input_len, 1,
                                        &unit, body_out, &body) == 0);
     assert(init.energy_nj > 0.0 && body.energy_nj > 0.0);
@@ -129,7 +129,7 @@ static void assert_reusable_classifier_regions(const IrGraph *graph, const SramL
  * reuses ProgramCost across emission attempts. */
 static void assert_program_cost_zeroed_on_region_failure(const IrGraph *graph,
                                                           const SramLayout *layout,
-                                                          const RegAllocResult *regalloc,
+                                                          const ReuseAnalysis *reuse,
                                                           const CostModel *cost_model,
                                                           const int8_t *demo_input,
                                                           size_t demo_input_len) {
@@ -143,7 +143,7 @@ static void assert_program_cost_zeroed_on_region_failure(const IrGraph *graph,
     FILE *out = tmpfile();
     assert(out != NULL);
     ProgramCost cost = {123.0, 456, 789.0, 1011};
-    assert(codegen_emit_program(&unsupported_graph, layout, regalloc, cost_model,
+    assert(codegen_emit_program(&unsupported_graph, layout, reuse, cost_model,
                                demo_input, demo_input_len, 0, out, &cost) != 0);
     assert(cost.prologue_energy_nj == 0.0);
     assert(cost.prologue_cycles == 0);
@@ -162,7 +162,7 @@ static void assert_program_cost_zeroed_on_region_failure(const IrGraph *graph,
  * sequence must never come at the cost of a wrong answer. */
 static void run_and_check_golden(const char *label, int use_optimized,
                                   const IrGraph *graph, const SramLayout *layout,
-                                  const RegAllocResult *regalloc, const CostModel *cost_model,
+                                  const ReuseAnalysis *reuse, const CostModel *cost_model,
                                   const int8_t *demo_input, size_t demo_input_len,
                                   const int8_t *golden_output, size_t golden_len) {
     printf("=== %s ===\n", label);
@@ -182,12 +182,12 @@ static void run_and_check_golden(const char *label, int use_optimized,
         Candidate candidates[PROGRAM_MAX_CANDIDATES];
         size_t count;
         if (use_optimized) {
-            count = candidates_generate(graph, i, layout, regalloc, cost_model,
+            count = candidates_generate(graph, i, layout, reuse, cost_model,
                                          demo_input, demo_input_len,
                                          candidates, PROGRAM_MAX_CANDIDATES);
             assert(count >= 1);
         } else {
-            assert(lower_op(graph, i, layout, regalloc, cost_model, demo_input, demo_input_len, &candidates[0]) == 0);
+            assert(lower_op(graph, i, layout, reuse, cost_model, demo_input, demo_input_len, &candidates[0]) == 0);
             count = 1;
         }
         for (size_t c = 0; c < count; c++) assert_priced(&candidates[c]);
@@ -245,17 +245,17 @@ int main(int argc, char **argv) {
     assert(sram_layout_build(&graph, &layout) == 0);
     printf("sram layout: %u bytes used\n", layout.bytes_used);
 
-    RegAllocResult regalloc;
-    assert(regalloc_next_use(&graph, &regalloc) == 0);
+    ReuseAnalysis reuse;
+    assert(reuse_analyze(&graph, &reuse) == 0);
 
     int8_t demo_input[64];
     size_t demo_input_len = 0;
     assert(read_int8_file(argv[3], demo_input, 64, &demo_input_len) == 0);
     assert(demo_input_len == 16);
 
-    assert_reusable_classifier_regions(&graph, &layout, &regalloc, &cost_model,
+    assert_reusable_classifier_regions(&graph, &layout, &reuse, &cost_model,
                                        demo_input, demo_input_len);
-    assert_program_cost_zeroed_on_region_failure(&graph, &layout, &regalloc, &cost_model,
+    assert_program_cost_zeroed_on_region_failure(&graph, &layout, &reuse, &cost_model,
                                                   demo_input, demo_input_len);
 
     /* This exact input was chosen (see models/tiny_classifier_golden_input.txt's
@@ -269,12 +269,12 @@ int main(int argc, char **argv) {
     size_t golden_len = 0;
     assert(read_int8_file(argv[4], golden_output, 64, &golden_len) == 0);
 
-    run_and_check_golden("naive", 0, &graph, &layout, &regalloc, &cost_model,
+    run_and_check_golden("naive", 0, &graph, &layout, &reuse, &cost_model,
                           demo_input, demo_input_len, golden_output, golden_len);
-    run_and_check_golden("optimized", 1, &graph, &layout, &regalloc, &cost_model,
+    run_and_check_golden("optimized", 1, &graph, &layout, &reuse, &cost_model,
                           demo_input, demo_input_len, golden_output, golden_len);
 
-    regalloc_result_free(&regalloc);
+    reuse_analysis_free(&reuse);
     sram_layout_free(&layout);
     ir_graph_free(&graph);
 
