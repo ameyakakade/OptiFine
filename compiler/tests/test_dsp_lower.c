@@ -38,7 +38,7 @@ static double double_of_q15(int16_t v) {
 /* Writes a and b as Q15 values directly into interp->mem at fixed test
  * addresses, runs lower_fixed_mul_q15 through the interpreter, and
  * checks the Q15 product against a host double reference within 2 LSB
- * (this routine truncates rather than rounds -- see lower.c's comment on
+ * (this routine truncates rather than rounds -- see lower_dsp.c's comment on
  * lower_fixed_mul_q15 -- so a small, documented tolerance is expected,
  * not a bug). */
 static void check_one_multiply(CostModel *cost_model, double a, double b) {

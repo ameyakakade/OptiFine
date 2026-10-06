@@ -8,7 +8,7 @@ typedef struct {
 } CategoryEntry;
 
 /* 1-cycle and 2-cycle opcodes this project's naive codegen (compiler/src/
- * codegen/lower.c) emits beyond the 7 already priced directly in
+ * codegen/lower*.c) emits beyond the 7 already priced directly in
  * cost_table.toml. Bucket choice within a cycle-count class is arbitrary
  * (see header comment) except where the opcode family genuinely matches an
  * existing category (muls/mulsu -> MUL, adc -> ADD, sbc -> SUB, lsl is the

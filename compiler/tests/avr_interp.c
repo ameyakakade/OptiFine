@@ -8,9 +8,9 @@
 
 /* AvrInstr operands are always either "rN" (a register) or a "0x..." hex
  * literal (an immediate or a direct SRAM address) -- see
- * compiler/src/codegen/lower.c's fmt_reg/fmt_imm/fmt_addr. Which operand
+ * compiler/src/codegen/instr_buf.c's fmt_reg/fmt_imm/fmt_addr. Which operand
  * position is which is fixed per-mnemonic below, matching exactly what
- * lower.c emits. */
+ * the lowering emits. */
 static int reg_of(const char *s) {
     return atoi(s + 1);
 }
@@ -382,7 +382,7 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
 
     fprintf(stderr,
             "avr_interp: unsupported opcode '%s' -- this is a test-only interpreter covering "
-            "only what lower.c emits, not a general AVR simulator\n",
+            "only what the lowering emits, not a general AVR simulator\n",
             m);
     return -1;
 }

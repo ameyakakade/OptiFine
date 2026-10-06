@@ -354,7 +354,7 @@ int main(int argc, char **argv) {
 
     /* Must run before any codegen: refuses to compile if this specific
      * input would overflow int8 through any Requantize stage (see
-     * lower.h/lower.c for why this checks the actual input rather than a
+     * lower.h/lower_requantize.c for why this checks the actual input rather than a
      * worst-case bound over all possible inputs). */
     if (lower_verify_demo_forward_pass(&graph, demo_input, demo_input_len) != 0) {
         fprintf(stderr, "failed to verify demo input against the model: %s\n", input_path);

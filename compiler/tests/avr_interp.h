@@ -1,5 +1,5 @@
 /* A small test-only AVR interpreter covering exactly the opcode subset
- * compiler/src/codegen/lower.c emits: the 18 straight-line opcodes (ldi,
+ * compiler/src/codegen/lower*.c emit: the 18 straight-line opcodes (ldi,
  * sts, lds, mov, clr, add, adc, sub, sbc, lsl, rol, com, and, asr, ror,
  * mul, muls, mulsu) plus the DSP path's counted-loop machinery (dec, brne,
  * ld, st, ldd, std, adiw, sbiw, movw, subi, sbci and the .L label

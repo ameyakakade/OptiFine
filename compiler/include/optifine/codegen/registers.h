@@ -28,7 +28,7 @@
  * within-one-op register cache, not cross-op residency across the whole
  * program -- see regalloc.h's module comment for why the latter isn't
  * attempted):
- *   - r9-r15, r26-r31: unused anywhere in lower.c.
+ *   - r9-r15, r26-r31: unused by any ML lowering.
  *   - r24/r25 (REG_SCRATCH0/1): used by lower_bytes/lower_output/
  *     lower_requantize_element, but never by lower_matmul.
  *   - r3-r8 (REG_PROD_BASE..+REQUANT_PRODUCT_BYTES): Requantize's 48-bit
@@ -44,7 +44,7 @@
 #define MATMUL_CACHE_POOL_SIZE 21
 extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
 
-/* DSP path (compiler/src/codegen/lower.c's lower_fixed_mul_q15 and
+/* DSP path (compiler/src/codegen/lower_dsp.c's lower_fixed_mul_q15 and
  * friends) -- never live concurrently with the ML-path registers above,
  * since a --dsp build never lowers an ML op and vice versa (see main.c).
  * A0/A1/B0/B1 sit in r16-r23 because muls/mulsu require both operands
@@ -121,7 +121,7 @@ extern const int kMatmulCacheRegs[MATMUL_CACHE_POOL_SIZE];
  * the SRAM outer-counter close, both of which go through REG_SCRATCH0. */
 #define REG_DSP_MASK 25
 
-/* OP_PEAK_EXTRACT (lower.c) does no 32-bit arithmetic and no multiply, so it
+/* OP_PEAK_EXTRACT (lower_peak.c) does no 32-bit arithmetic and no multiply, so it
  * owns these as plain bytes for its duration -- the same caller-owned use of
  * the DSP32 quads and the 16-bit window every DSP op makes, never live across
  * an op boundary:

@@ -1,5 +1,5 @@
 /* Deterministic SRAM address allocation for the naive ML codegen
- * (compiler/src/codegen/lower.c). regalloc_next_use always reports every
+ * (compiler/src/codegen/lower*.c). regalloc_next_use always reports every
  * op's output value as spilled (-1, see regalloc.c) -- this module decides
  * *where* each spilled value lives in SRAM: one contiguous slot per op, in
  * ascending op id order. */
@@ -36,7 +36,7 @@
  * the arena must cover the largest single op's extent, never the sum.
  *
  * Ownership, as offsets into the arena:
- *   OP_FFT_BUTTERFLY  0-25  butterfly temporaries (lower.c BF_*)
+ *   OP_FFT_BUTTERFLY  0-25  butterfly temporaries (lower_fft.c BF_*)
  *                     180   block counter        (DSP_SCRATCH_FFT_OUTER_COUNT)
  *   OP_MAGNITUDE      0     element counter      (DSP_SCRATCH_MAG_COUNT),
  *                           aliasing BF_AC across the op boundary

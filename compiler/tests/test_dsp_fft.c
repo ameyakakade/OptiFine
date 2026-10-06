@@ -1,9 +1,9 @@
 /* Full 64-point FFT validation: stages 0-5, individually and chained.
  *
  * The oracle is written in the textbook iterative radix-2 DIT form (span m =
- * 2, 4, .., 64; twiddle W^(j*N/m)) rather than lower.c's blocks/half form, so
+ * 2, 4, .., 64; twiddle W^(j*N/m)) rather than lower_fft.c's blocks/half form, so
  * the two formulations are cross-checked instead of one being copied into the
- * other. It uses the same Q15 definitions the equations in lower.c state:
+ * other. It uses the same Q15 definitions the equations in lower_fft.c state:
  * qmul = floor(x*y / 32768), /2 = arithmetic shift, halve before combining,
  * int16 wrap on add/sub (which the scaling proves never happens).
  *

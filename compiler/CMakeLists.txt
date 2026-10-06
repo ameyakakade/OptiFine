@@ -54,6 +54,12 @@ add_library(optifine_core STATIC
     src/codegen/dsp32.c
     src/codegen/instr_buf.c
     src/codegen/lower.c
+    src/codegen/lower_dsp.c
+    src/codegen/lower_fft.c
+    src/codegen/lower_magnitude.c
+    src/codegen/lower_ml.c
+    src/codegen/lower_peak.c
+    src/codegen/lower_requantize.c
     src/codegen/periodic.c
     src/codegen/program.c
     src/codegen/regalloc.c

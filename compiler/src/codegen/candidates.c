@@ -18,7 +18,7 @@ void candidate_free(Candidate *candidate) {
  * regalloc.h's next-use analysis) into free registers ONCE, then reuses
  * it via `mov` (1 cycle) instead of re-`lds`-ing it from SRAM (2 cycles)
  * on every one of the N output channels that need it. This is the
- * dominant redundancy in the naive baseline (lower.c's static
+ * dominant redundancy in the naive baseline (lower_ml.c's
  * lower_matmul): fc1's MatMul re-loads its 16-byte input 8 times (128
  * loads for 16 unique bytes); this candidate loads each byte once, up to
  * MATMUL_CACHE_POOL_SIZE. Weight bytes are never reused -- each (n,k)

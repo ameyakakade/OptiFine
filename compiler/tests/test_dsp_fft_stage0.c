@@ -2,7 +2,7 @@
  * twiddle loading, complex Q15 layout, butterfly arithmetic, stage scaling and
  * exact cost accounting.
  *
- * The host oracle below is written from the equations in lower.c's comment,
+ * The host oracle below is written from the equations in lower_fft.c's comment,
  * using the same Q15 definitions, and is compared against the interpreter over
  * the entire 64-element complex buffer for every vector. */
 #include <assert.h>
@@ -30,7 +30,7 @@ static void load_costs(void) {
     assert(cost_model_load(p ? p : "cost_table.toml", &g_cm) == 0);
 }
 
-/* --- host oracle, from lower.c's stated equations --------------------- */
+/* --- host oracle, from lower_fft.c's stated equations --------------------- */
 static int16_t h_qmul(int16_t x, int16_t y) { return (int16_t)(((int32_t)x * (int32_t)y) >> 15); }
 static int16_t h_asr(int16_t v)             { return (int16_t)(v >> 1); }
 static int16_t h_add(int16_t a, int16_t b)  { return (int16_t)((uint16_t)a + (uint16_t)b); }

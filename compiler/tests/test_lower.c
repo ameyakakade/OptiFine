@@ -262,7 +262,7 @@ int main(int argc, char **argv) {
      * header) to actually pass both Requantize stages for this model's real
      * calibrated scales -- a worst-case-magnitude input like all-127s
      * reliably overflows even a mathematically correct int8 pipeline
-     * (MinMax calibration cannot bound arbitrary inputs, see lower.c). */
+     * (MinMax calibration cannot bound arbitrary inputs, see lower_requantize.c). */
     assert(lower_verify_demo_forward_pass(&graph, demo_input, demo_input_len) == 0);
 
     int8_t golden_output[64];

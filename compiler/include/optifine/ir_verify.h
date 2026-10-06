@@ -24,7 +24,7 @@
  *     there)
  *   - ML and DSP operators are not mixed (the two lowerings share registers
  *     on the premise that they never meet in one program, registers.h)
- * Checked per operator (the contracts the lowering in lower.c implements):
+ * Checked per operator (the contracts the lowering in lower*.c implements):
  *   ML    Input INT8; Const INT8 or INT32
  *         MatMul  INT8[K] x INT8[N,K] -> INT32[N]
  *         Add     INT32[n] + INT32[n] -> INT32[n]

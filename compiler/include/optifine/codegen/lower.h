@@ -19,7 +19,7 @@
 
 /* One-time, program-global initialization: `clr r2`. r2 is used as an
  * always-zero register for carry propagation in Requantize's wide
- * multiply (see lower.c) -- mul/muls/mulsu only ever write r0:r1, so r2
+ * multiply (see lower_requantize.c) -- mul/muls/mulsu only ever write r0:r1, so r2
  * stays zero for the whole program once cleared here. Must be emitted
  * exactly once, before any op's lowering. */
 int lower_init_zero_reg(const CostModel *cost_model, Candidate *out);
@@ -32,7 +32,7 @@ int lower_init_zero_reg(const CostModel *cost_model, Candidate *out);
  * emitted. Returns 0 if every Requantize stage stays within int8 range for
  * this input, non-zero (with an error already printed to stderr)
  * otherwise -- this project does not saturate at runtime, it refuses to
- * compile instead (see lower.c for why a static worst-case-over-all-inputs
+ * compile instead (see lower_requantize.c for why a static worst-case-over-all-inputs
  * bound is not used: it is mathematically infeasible to satisfy for
  * MinMax-calibrated per-tensor quantization on unbounded-support inputs). */
 int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_input, size_t demo_input_len);
@@ -47,7 +47,7 @@ int lower_verify_demo_forward_pass(const IrGraph *graph, const int8_t *demo_inpu
  * stderr) for: an OpKind with no lowering, a DSP op whose tensor shapes or
  * dtypes are not the ones its lowering handles, or a Requantize op whose compile-time-verified worst-case output would
  * overflow int8 range given the model's real weight/bias magnitudes (see
- * lower.c's compute_fixed_multiplier -- this project does not saturate at
+ * lower_requantize.c's compute_fixed_multiplier -- this project does not saturate at
  * runtime, it refuses to compile instead). */
 int lower_op(const IrGraph *graph, size_t op_id,
              const SramLayout *layout, const RegAllocResult *regalloc,
@@ -55,7 +55,7 @@ int lower_op(const IrGraph *graph, size_t op_id,
              const int8_t *demo_input, size_t demo_input_len,
              Candidate *out);
 
-/* Test-only seam for test_dsp_lower.c -- see lower.c's lower_fixed_mul_q15
+/* Test-only seam for test_dsp_lower.c -- see lower_dsp.c's lower_fixed_mul_q15
  * comment. Not part of the codegen pipeline's real call path. */
 int lower_fixed_mul_q15_test_hook(uint16_t a_addr, uint16_t b_addr, uint16_t out_addr,
                                    const CostModel *cost_model, Candidate *out);
@@ -90,7 +90,7 @@ int lower_fft_stages_test_hook(const IrGraph *graph, int first_stage, int last_s
                                const SramLayout *layout, const CostModel *cost_model,
                                Candidate *out);
 
-/* Test seam for OP_BIT_REVERSE's permutation (see lower.c). */
+/* Test seam for OP_BIT_REVERSE's permutation (see lower_dsp.c). */
 size_t dsp_bit_reverse_index_test_hook(size_t i, int bits);
 
 #endif /* OPTIFINE_CODEGEN_LOWER_H */
