@@ -81,13 +81,14 @@ static const CategoryEntry kCategories[] = {
     {"sbci", "SUB"},
 };
 
-/* Opcodes whose cycle count no cost_table.toml category expresses.
+/* Opcodes whose ENERGY no cost_table.toml category expresses.
  *
  * `lpm` takes 3 cycles and every category in the table is 1 or 2, so there is
  * nothing honest to map it onto. Rather than add an entry -- cost_table.toml
  * is a recorded input of every retained experiment -- these are priced
- * directly as `cycles x the per-cycle constant`, which is precisely what
- * every category in the table already reduces to (SOURCES.md).
+ * directly as `cycles x the active-mode per-cycle energy`, which is precisely
+ * what every category in the table already reduces to (SOURCES.md). The
+ * cycle counts here must agree with kAvrCycles (test_cost_category checks).
  * The indirection through a category name is a lookup convenience, not part of
  * the energy model. */
 static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
@@ -102,6 +103,36 @@ static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
      * reported); pricing it makes that constant explicit instead of magic. */
     {"break", 1},
 };
+
+/* ATmega128 execution time of every opcode this compiler emits, in CPU
+ * cycles, from the AVR Instruction Set Manual (SOURCES.md). This is the
+ * compiler's cycle model. It is target timing, independent of the energy
+ * model: cost_table.toml says what a cycle of each category costs in energy,
+ * this table says how many cycles an instruction takes. Conditional branches
+ * are listed at their taken cost; instrbuf_price corrects the one fall-through
+ * of each counted loop. */
+static const struct { const char *mnemonic; int cycles; } kAvrCycles[] = {
+    {"add", 1},  {"adc", 1},  {"sub", 1},  {"sbc", 1},  {"subi", 1}, {"sbci", 1},
+    {"and", 1},  {"eor", 1},  {"com", 1},  {"clr", 1},  {"lsl", 1},  {"lsr", 1},
+    {"rol", 1},  {"ror", 1},  {"asr", 1},  {"dec", 1},  {"cp", 1},   {"cpc", 1},
+    {"mov", 1},  {"movw", 1}, {"ldi", 1},
+    {"mul", 2},  {"muls", 2}, {"mulsu", 2},
+    {"adiw", 2}, {"sbiw", 2},
+    {"lds", 2},  {"sts", 2},  {"ld", 2},   {"ldd", 2},  {"st", 2},   {"std", 2},
+    {"lpm", 3},
+    {"brne", 2}, {"breq", 2}, {"rjmp", 2},
+    {"break", 1},
+};
+
+int avr_instr_cycles(const char *avr_mnemonic) {
+    if (!avr_mnemonic) return 0;
+    for (size_t i = 0; i < sizeof(kAvrCycles) / sizeof(kAvrCycles[0]); i++) {
+        if (strcmp(kAvrCycles[i].mnemonic, avr_mnemonic) == 0) {
+            return kAvrCycles[i].cycles;
+        }
+    }
+    return 0;
+}
 
 int avr_direct_cycles(const char *avr_mnemonic) {
     if (!avr_mnemonic) return 0;

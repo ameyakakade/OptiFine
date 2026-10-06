@@ -41,8 +41,8 @@ typedef struct {
 typedef struct {
     AvrInstr *instructions;
     size_t num_instructions;
-    uint32_t cycles;    /* for reference/comparison, not the selection criterion */
-    double energy_nj;   /* computed from the cost table */
+    uint32_t cycles;    /* executed cycles, from the AVR timing table; not the selection criterion */
+    double energy_nj;   /* predicted (simulated-model) energy, from the cost table */
 } Candidate;
 
 void candidate_free(Candidate *candidate);

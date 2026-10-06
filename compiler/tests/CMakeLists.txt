@@ -33,6 +33,10 @@ optifine_add_test(test_dsp_build)
 optifine_add_test(test_ir_verify ARGS ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx)
 optifine_add_test(test_sram_layout_dsp)
 optifine_add_test(test_avr_interp_opcodes)
+optifine_add_test(test_pricing ARGS
+    ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx
+    ${OPTIFINE_REPO_ROOT}/cost_table.toml
+    ${CMAKE_CURRENT_BINARY_DIR})
 optifine_add_test(test_lower ARGS
     ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx
     ${OPTIFINE_REPO_ROOT}/cost_table.toml

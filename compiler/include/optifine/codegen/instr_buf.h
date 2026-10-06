@@ -142,12 +142,13 @@ void fmt_hi8_sym(char *out, const char *symbol, int offset);
 /* Converts a finished InstrBuf into a priced Candidate, taking ownership of
  * buf->items. Returns 0 on success, -1 (with an error printed, and the items
  * freed) if building the buffer ran out of memory or any instruction has no
- * cost-category mapping or no cost_table.toml entry.
- * Every cost_table.toml entry is cycles x a single per-cycle constant (see
- * SOURCES.md's "Per-cycle energy constant" section);
- * `cycles` is derived from energy rather than tracked separately, so the
- * 2.8375 constant here MUST be kept in sync with cost_table.toml's actual
- * per-cycle value. */
+ * cycle count, no cost-category mapping or no cost_table.toml entry.
+ *
+ * `cycles` and `energy_nj` are accumulated separately over the executed
+ * instruction stream: cycles from the AVR timing table (cost_category.h's
+ * avr_instr_cycles), energy from the cost model. Under the current table,
+ * where every entry is cycles x one per-cycle constant (SOURCES.md), energy
+ * is proportional to cycles, but neither is computed from the other. */
 int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out);
 
 #endif /* OPTIFINE_CODEGEN_INSTR_BUF_H */

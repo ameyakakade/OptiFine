@@ -5,15 +5,20 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <math.h>
 
 
 #include "optifine/codegen/cost_category.h"
 #include "optifine/codegen/registers.h"
 
-/* Must stay in sync with cost_table.toml's per-cycle constant; see
- * SOURCES.md "Per-cycle energy constant". */
-#define AVR_CYCLE_ENERGY_NJ 2.8375
+/* Active-mode energy of one CPU cycle in the energy model: Avrora's
+ * ATmega128 active current at its supply voltage and clock (SOURCES.md,
+ * "Per-cycle energy constant"). It prices the cycles cost_table.toml has no
+ * category for -- lpm, rjmp, break, and the branch cycles a counted loop gives
+ * back -- and is an ENERGY figure only: cycle counts come from
+ * avr_instr_cycles. It equals the 1-cycle entries of the current table; a
+ * hardware-derived model that differentiates energy per instruction would
+ * replace it with its own figures. */
+#define AVR_ACTIVE_ENERGY_PER_CYCLE_NJ 2.8375
 
 void instrbuf_init(InstrBuf *b) {
     b->items = NULL;
@@ -276,6 +281,13 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
         buf->items = NULL;
         return -1;
     }
+    /* Two independent accumulations over the same executed instruction
+     * stream: CYCLES from the AVR timing table (avr_instr_cycles, a property
+     * of the target), ENERGY from the cost model (cost_table.toml categories,
+     * plus AVR_ACTIVE_ENERGY_PER_CYCLE_NJ for the opcodes the table cannot
+     * express). Neither is derived from the other, so a future table with
+     * differentiated per-instruction energy cannot change a cycle count. */
+    uint64_t cycles = 0;
     double energy_nj = 0.0;
     for (size_t i = 0; i < buf->count; i++) {
         /* A label is an assembler directive, not an instruction: it occupies
@@ -284,26 +296,12 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
         if (avr_instr_is_label(&buf->items[i]) || avr_instr_is_data_word(&buf->items[i])) {
             continue; /* directives: flash for .dw, nothing for .L; no cycles either way */
         }
-        uint32_t direct = 1;
-        for (size_t l = 0; l < buf->num_loops; l++) {
-            if (i >= buf->loops[l].first && i <= buf->loops[l].last) direct *= buf->loops[l].trip;
-        }
-        int direct_cycles = avr_direct_cycles(buf->items[i].mnemonic);
-        if (direct_cycles) {
-            energy_nj += AVR_CYCLE_ENERGY_NJ * (double)direct_cycles * (double)direct;
-            continue;
-        }
-        const char *category = avr_cost_category(buf->items[i].mnemonic);
-        if (!category) {
-            fprintf(stderr, "instr_buf: opcode '%s' has no cost category mapping\n", buf->items[i].mnemonic);
+        const char *mnemonic = buf->items[i].mnemonic;
+        int instr_cycles = avr_instr_cycles(mnemonic);
+        if (instr_cycles == 0) {
+            fprintf(stderr, "instr_buf: opcode '%s' has no AVR cycle count\n", mnemonic);
             free(buf->items);
-            return -1;
-        }
-        const CostEntry *entry = cost_model_lookup(cost_model, category);
-        if (!entry) {
-            fprintf(stderr, "instr_buf: cost category '%s' (for opcode '%s') has no cost_table.toml entry\n",
-                    category, buf->items[i].mnemonic);
-            free(buf->items);
+            buf->items = NULL;
             return -1;
         }
         /* Executed cost, not emitted cost: an instruction inside a counted
@@ -316,16 +314,39 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
                 repeat *= buf->loops[l].trip;
             }
         }
+        cycles += (uint64_t)instr_cycles * repeat;
+
+        if (avr_direct_cycles(mnemonic)) {
+            energy_nj += AVR_ACTIVE_ENERGY_PER_CYCLE_NJ * (double)instr_cycles * (double)repeat;
+            continue;
+        }
+        const char *category = avr_cost_category(mnemonic);
+        if (!category) {
+            fprintf(stderr, "instr_buf: opcode '%s' has no cost category mapping\n", mnemonic);
+            free(buf->items);
+            buf->items = NULL;
+            return -1;
+        }
+        const CostEntry *entry = cost_model_lookup(cost_model, category);
+        if (!entry) {
+            fprintf(stderr, "instr_buf: cost category '%s' (for opcode '%s') has no cost_table.toml entry\n",
+                    category, mnemonic);
+            free(buf->items);
+            buf->items = NULL;
+            return -1;
+        }
         energy_nj += entry->energy_nj * (double)repeat;
     }
-    /* Conditional branches are priced at their TAKEN cost (2 cycles), but a
+    /* Conditional branches are counted at their TAKEN cost (2 cycles), but a
      * counted loop resolves the opposite way exactly once:
      *   short form  `dec / brne head`   -- brne falls through once (1 not 2)
      *   long form   `dec / breq exit / rjmp head` -- breq is NOT taken on
      *               every iteration but the last, so it costs 1 rather than
      *               2 for (trip-1) iterations, and the rjmp does not execute
      *               at all on the final iteration.
-     * Both corrections are exact, not approximations. */
+     * Both corrections are exact, not approximations. The cycles given back
+     * are removed from the cycle count, and their active-mode energy from the
+     * energy total. */
     for (size_t l = 0; l < buf->num_loops; l++) {
         uint32_t outer = 1;
         for (size_t o = 0; o < buf->num_loops; o++) {
@@ -340,19 +361,18 @@ int instrbuf_price(InstrBuf *buf, const CostModel *cost_model, Candidate *out) {
          * loop's closure; it only gave the right answer because an outer body
          * is always at least as long as the inner one it wraps. */
         uint32_t trip = buf->loops[l].trip;
-        double give_back;
-        if (buf->loops[l].is_long) {
-            /* breq not taken for trip-1 iterations: -1 cycle each.
-             * rjmp skipped on the final iteration: -2 cycles once. */
-            give_back = (double)(trip - 1) * 1.0 + 2.0;
-        } else {
-            give_back = 1.0; /* brne falls through once */
-        }
-        energy_nj -= AVR_CYCLE_ENERGY_NJ * give_back * (double)outer;
+        /* breq not taken for trip-1 iterations: -1 cycle each, and the rjmp
+         * skipped on the final iteration: -2 cycles once. Or brne falling
+         * through once: -1. */
+        uint64_t give_back = buf->loops[l].is_long ? (uint64_t)(trip - 1) + 2 : 1;
+        OPTIFINE_INVARIANT(cycles >= give_back * outer);
+        cycles -= give_back * outer;
+        energy_nj -= AVR_ACTIVE_ENERGY_PER_CYCLE_NJ * (double)give_back * (double)outer;
     }
+    OPTIFINE_INVARIANT(cycles <= UINT32_MAX);
     out->instructions = buf->items;
     out->num_instructions = buf->count;
-    out->cycles = (uint32_t)llround(energy_nj / AVR_CYCLE_ENERGY_NJ);
+    out->cycles = (uint32_t)cycles;
     out->energy_nj = energy_nj;
     return 0;
 }

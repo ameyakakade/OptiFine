@@ -16,10 +16,16 @@
  * must treat NULL as fatal -- never default to a silent zero cost. */
 const char *avr_cost_category(const char *avr_mnemonic);
 
-/* Cycle count for opcodes no cost-table category can express (currently only
- * `lpm`, at 3 cycles). Returns 0 when the opcode is not one of them, in which
- * case avr_cost_category applies. See cost_category.c for why these are not
- * given their own cost_table.toml entries. */
+/* Opcodes no cost-table category can express (lpm at 3 cycles, rjmp, break)
+ * are priced in energy as their cycle count times the active-mode per-cycle
+ * energy. Returns that cycle count, or 0 when the opcode is not one of them,
+ * in which case avr_cost_category supplies its energy. See cost_category.c
+ * for why these are not given their own cost_table.toml entries. */
 int avr_direct_cycles(const char *avr_mnemonic);
+
+/* The AVR cycle model: CPU cycles `avr_mnemonic` takes on the ATmega128 (a
+ * conditional branch at its taken cost), or 0 for an opcode the compiler
+ * does not know. Independent of the energy model above. */
+int avr_instr_cycles(const char *avr_mnemonic);
 
 #endif /* OPTIFINE_CODEGEN_COST_CATEGORY_H */
