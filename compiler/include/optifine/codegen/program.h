@@ -1,7 +1,8 @@
 /* Orchestrates per-op lowering for the whole graph into one flat AVR .s
  * program. Each op's candidate(s) are routed through select_min_energy
  * (a real cost-based pick when candidates_generate returns more than one,
- * a pass-through otherwise) and locality_optimize (still a no-op). See
+ * a pass-through otherwise). There is no locality or scheduling pass: the
+ * selected sequence is emitted as lowered. See
  * codegen_emit_program's `use_real_candidates` parameter for the choice
  * between the naive baseline and active-mode optimization's real candidate
  * diversity. */

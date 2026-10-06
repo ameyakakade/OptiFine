@@ -6,18 +6,15 @@
 #include "optifine/codegen/lower.h"
 #include "optifine/codegen/select.h"
 #include "optifine/emit.h"
-#include "optifine/locality.h"
 
 /* Picks the cheapest of `candidates[0..count)` via select_min_energy,
- * applies locality_optimize, emits it, and frees every candidate exactly
- * once (the winner is a shallow copy sharing its `instructions` pointer
+ * emits it, and frees every candidate exactly once (the winner is a shallow copy sharing its `instructions` pointer
  * with the original `candidates[]` slot select_min_energy pointed at, so
  * that slot must NOT also be freed separately). */
 static int emit_best(Candidate *candidates, size_t count, EmitUnit *unit, FILE *out,
                      double *energy_acc, uint32_t *cycles_acc) {
     const Candidate *best = select_min_energy(candidates, count);
     Candidate mutable_best = *best;
-    locality_optimize(&mutable_best);
 
     int rc = emit_candidate(unit, &mutable_best, out);
     *energy_acc += mutable_best.energy_nj;

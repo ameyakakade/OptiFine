@@ -48,7 +48,6 @@ add_library(optifine_core STATIC
     src/cost_model.c
     src/emit.c
     src/invariant.c
-    src/locality.c
     src/codegen/candidates.c
     src/codegen/cost_category.c
     src/codegen/dsp32.c

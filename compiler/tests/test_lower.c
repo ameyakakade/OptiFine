@@ -14,7 +14,6 @@
 #include "optifine/cost_model.h"
 #include "optifine/ingest.h"
 #include "optifine/ir.h"
-#include "optifine/locality.h"
 
 #include "avr_interp.h"
 
@@ -153,8 +152,8 @@ static void assert_program_cost_zeroed_on_region_failure(const IrGraph *graph,
 }
 
 /* Runs the full 13-op graph through either lower_op directly (the
- * naive baseline) or candidates_generate + select_min_energy +
- * locality_optimize (active-mode optimization), executes
+ * naive baseline) or candidates_generate + select_min_energy
+ * (active-mode optimization), executes
  * every emitted instruction through the AVR interpreter, and checks the
  * final OP_OUTPUT bytes against the independently-computed golden
  * reference within +/-1 LSB. Both paths must produce a numerically
@@ -194,7 +193,6 @@ static void run_and_check_golden(const char *label, int use_optimized,
 
         const Candidate *best = select_min_energy(candidates, count);
         Candidate mutable_best = *best;
-        locality_optimize(&mutable_best);
 
         printf("op %zu (kind=%d): %zu candidate(s), picked %zu instructions, %u cycles, %.3f nJ\n",
                i, (int)graph->ops[i].kind, count, mutable_best.num_instructions,
