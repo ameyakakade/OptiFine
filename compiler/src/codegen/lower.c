@@ -1248,6 +1248,10 @@ int lower_op(const IrGraph *graph, size_t op_id,
             break;
         }
         case OP_CONST: {
+            /* ir_verify guarantees the initializer is exactly the tensor
+             * layout reserved; more would overwrite the next tensor. */
+            size_t bytes = 0;
+            OPTIFINE_INVARIANT(ir_op_tensor_size(op, NULL, &bytes) == 0 && op->data_len == bytes);
             uint16_t addr = sram_layout_addr(layout, graph, op_id, 0);
             lower_bytes(&buf, (const uint8_t *)op->data, op->data_len, addr);
             break;
@@ -1283,38 +1287,29 @@ int lower_op(const IrGraph *graph, size_t op_id,
             break;
         case OP_FFT_BUTTERFLY: {
             int stage = dsp_butterfly_stage_index(graph, op_id);
-            if (stage >= DSP_FFT_LOG2) {
-                fprintf(stderr, "lower: FFT stage %d exceeds the %d stages of a %d-point transform\n",
-                        stage, DSP_FFT_LOG2, DSP_FFT_SIZE);
-                free(buf.items);
-                return -1;
-            }
+            OPTIFINE_INVARIANT(stage < DSP_FFT_LOG2); /* ir_verify caps the stage count */
             lower_fft_butterfly_stage(&buf, graph, layout, op_id, stage);
             break;
         }
         case OP_MAGNITUDE: {
-            const IrOp *in_op = &graph->ops[op->inputs[0]];
+            /* COMPLEX_Q15[n] -> FIXED_Q15[n] with n <= 256 is ir_verify's
+             * contract; the 8-bit counted loop depends on the bound. */
             size_t n = sram_layout_num_elements(op);
-            if (in_op->dtype != DT_COMPLEX_Q15 || op->dtype != DT_FIXED_Q15 ||
-                sram_layout_num_elements(in_op) != n || n < 1 || n > 256) {
-                fprintf(stderr, "lower: OP_MAGNITUDE %zu expects COMPLEX_Q15[n] -> FIXED_Q15[n], "
-                                "1 <= n <= 256\n", op_id);
-                free(buf.items);
-                return -1;
-            }
+            OPTIFINE_INVARIANT(n >= 1 && n <= 256);
             lower_magnitude(&buf, graph, layout, op_id);
             break;
         }
         case OP_PEAK_EXTRACT: {
             const IrOp *in_op = &graph->ops[op->inputs[0]];
             size_t n = sram_layout_num_elements(in_op), k = sram_layout_num_elements(op);
-            /* indices and pass markers are single bytes, and at least one bin
-             * must stay eligible for every pass */
-            if (in_op->dtype != DT_FIXED_Q15 || op->dtype != DT_FIXED_Q15 ||
-                n < 1 || n > 255 || k < 1 || k > n ||
-                DSP_SCRATCH_PK_SELECTED + n > DSP_SCRATCH_BYTES) {
-                fprintf(stderr, "lower: OP_PEAK_EXTRACT %zu expects FIXED_Q15[n] -> FIXED_Q15[k], "
-                                "1 <= k <= n <= 255, n selected[] bytes in scratch\n", op_id);
+            /* Indices and pass markers are single bytes and at least one bin
+             * must stay eligible for every pass: 1 <= k <= n <= 255 is
+             * ir_verify's contract. Whether selected[] fits the scratch arena
+             * is this target's constraint, so it is checked here. */
+            OPTIFINE_INVARIANT(k >= 1 && k <= n && n <= 255);
+            if (DSP_SCRATCH_PK_SELECTED + n > DSP_SCRATCH_BYTES) {
+                fprintf(stderr, "lower: OP_PEAK_EXTRACT %zu needs %zu selected[] bytes, more than the "
+                                "%d-byte DSP scratch arena holds\n", op_id, n, DSP_SCRATCH_BYTES);
                 free(buf.items);
                 return -1;
             }

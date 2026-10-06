@@ -14,6 +14,7 @@
 #include "optifine/dsp_build.h"
 #include "optifine/ingest.h"
 #include "optifine/ir.h"
+#include "optifine/ir_verify.h"
 
 static void usage(const char *argv0) {
     fprintf(stderr,
@@ -167,6 +168,11 @@ static int run_dsp(const char *cost_table_path, const char *input_path, const ch
     IrGraph graph;
     if (dsp_build_pipeline(&graph) != 0) {
         free(input);
+        return 1;
+    }
+    if (ir_verify_or_report(&graph, "DSP pipeline") != 0) {
+        free(input);
+        ir_graph_free(&graph);
         return 1;
     }
     SramLayout layout;
@@ -328,6 +334,13 @@ int main(int argc, char **argv) {
     ir_graph_init(&graph);
     if (ingest_load_onnx(model_path, &graph) != 0) {
         fprintf(stderr, "failed to ingest model: %s\n", model_path);
+        ir_graph_free(&graph);
+        return 1;
+    }
+
+    /* The verification boundary: nothing below this point sees a graph that
+     * breaks an operator contract (ir_verify.h). */
+    if (ir_verify_or_report(&graph, model_path) != 0) {
         ir_graph_free(&graph);
         return 1;
     }

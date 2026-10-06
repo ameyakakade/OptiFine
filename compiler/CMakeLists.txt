@@ -41,6 +41,7 @@ endif()
 # archive members it actually needs.
 add_library(optifine_core STATIC
     src/ir.c
+    src/ir_verify.c
     src/pb_reader.c
     src/ingest.c
     src/dsp_build.c
