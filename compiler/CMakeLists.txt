@@ -50,6 +50,7 @@ add_library(optifine_core STATIC
     src/invariant.c
     src/mir/mir.c
     src/mir/mir_verify.c
+    src/codegen/avr_mir.c
     src/codegen/candidates.c
     src/codegen/cost_category.c
     src/codegen/dsp32.c

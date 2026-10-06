@@ -3,7 +3,8 @@
  * sts, lds, mov, clr, add, adc, sub, sbc, lsl, rol, com, and, asr, ror,
  * mul, muls, mulsu) plus the DSP path's counted-loop machinery (dec, brne,
  * ld, st, ldd, std, adiw, sbiw, movw, subi, sbci and the .L label
- * pseudo-instruction).
+ * pseudo-instruction), plus cp, cpc, eor, or, lsr, breq, rjmp and lpm, which
+ * the DSP kernels and the generic MIR selector (avr_mir.c) emit.
  * This is NOT a general AVR simulator: it exists only to execute this
  * project's own generated code for golden-value correctness testing, and
  * must never be used as a substitute for Avrora's real energy numbers or

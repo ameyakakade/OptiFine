@@ -23,7 +23,7 @@
 #define CURRENT_NJ_PER_CYCLE 2.8375
 
 static const char *kEmitted[] = {
-    "add", "adc", "sub", "sbc", "subi", "sbci", "and", "eor", "com", "clr", "lsl", "lsr", "rol", "ror",
+    "add", "adc", "sub", "sbc", "subi", "sbci", "and", "or", "eor", "com", "clr", "lsl", "lsr", "rol", "ror",
     "asr", "dec", "cp", "cpc", "mov", "movw", "ldi", "mul", "muls", "mulsu", "adiw", "sbiw", "lds", "sts",
     "ld", "ldd", "st", "std", "lpm", "brne", "breq", "rjmp", "break",
 };

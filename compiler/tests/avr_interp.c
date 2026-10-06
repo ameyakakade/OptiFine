@@ -315,6 +315,12 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         interp->zero = (r[rd] == 0);
         return 0;
     }
+    if (strcmp(m, "or") == 0) {
+        int rd = reg_of(instr->operands[0]);
+        r[rd] = (uint8_t)(r[rd] | r[reg_of(instr->operands[1])]);
+        interp->zero = (r[rd] == 0);
+        return 0;
+    }
     if (strcmp(m, "eor") == 0) {
         int rd = reg_of(instr->operands[0]);
         r[rd] = (uint8_t)(r[rd] ^ r[reg_of(instr->operands[1])]);

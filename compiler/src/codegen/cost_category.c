@@ -72,6 +72,7 @@ static const CategoryEntry kCategories[] = {
     {"cpc",  "SUB"},
     {"lsr",  "SUB"},
     {"eor",  "ADD"},
+    {"or",   "ADD"},   /* 1-cycle logical op, used by the generic MIR selector (avr_mir.c) */
 
     /* Immediate subtract, low byte then with borrow: the 16-bit pointer step
      * the FFT needs between a butterfly's p and q elements, which are up to
@@ -113,7 +114,7 @@ static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
  * of each counted loop. */
 static const struct { const char *mnemonic; int cycles; } kAvrCycles[] = {
     {"add", 1},  {"adc", 1},  {"sub", 1},  {"sbc", 1},  {"subi", 1}, {"sbci", 1},
-    {"and", 1},  {"eor", 1},  {"com", 1},  {"clr", 1},  {"lsl", 1},  {"lsr", 1},
+    {"and", 1},  {"or", 1},   {"eor", 1},  {"com", 1},  {"clr", 1},  {"lsl", 1},  {"lsr", 1},
     {"rol", 1},  {"ror", 1},  {"asr", 1},  {"dec", 1},  {"cp", 1},   {"cpc", 1},
     {"mov", 1},  {"movw", 1}, {"ldi", 1},
     {"mul", 2},  {"muls", 2}, {"mulsu", 2},
