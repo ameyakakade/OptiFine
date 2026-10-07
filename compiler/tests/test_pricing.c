@@ -25,7 +25,7 @@
 static const char *kEmitted[] = {
     "add", "adc", "sub", "sbc", "subi", "sbci", "and", "or", "eor", "com", "clr", "lsl", "lsr", "rol", "ror",
     "asr", "dec", "cp", "cpc", "mov", "movw", "ldi", "mul", "muls", "mulsu", "adiw", "sbiw", "lds", "sts",
-    "ld", "ldd", "st", "std", "lpm", "brne", "breq", "rjmp", "break",
+    "ld", "ldd", "st", "std", "lpm", "brne", "breq", "rjmp", "jmp", "break",
 };
 
 /* Prices every op of `g` (lower_op, the naive lowering) into cycles[] and

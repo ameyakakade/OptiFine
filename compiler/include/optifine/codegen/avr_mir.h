@@ -102,6 +102,13 @@ typedef struct {
 typedef struct {
     AvrMirSegment *segments;
     size_t count, capacity;
+    /* The function is one basic block, so it runs every emitted instruction
+     * once (or, inside a target region, as its counted loops say) and the
+     * segments' summed cycles and energy are its execution cost. With more
+     * than one block the sums are static -- each instruction priced once,
+     * whatever path runs -- and must not be presented as an execution
+     * estimate; path-sensitive costing does not exist yet. */
+    int straight_line;
 } AvrMirCode;
 
 void avr_mir_code_free(AvrMirCode *code);

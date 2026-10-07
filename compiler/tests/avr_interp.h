@@ -4,7 +4,9 @@
  * mul, muls, mulsu) plus the DSP path's counted-loop machinery (dec, brne,
  * ld, st, ldd, std, adiw, sbiw, movw, subi, sbci and the .L label
  * pseudo-instruction), plus cp, cpc, eor, or, lsr, breq, rjmp and lpm, which
- * the DSP kernels and the generic MIR selector (avr_mir.c) emit.
+ * the DSP kernels and the generic MIR selector (avr_mir.c) emit, and jmp,
+ * the selector's long branch. Branches go to their label whatever the
+ * distance: reach is the compiler's to check, not this interpreter's.
  * This is NOT a general AVR simulator: it exists only to execute this
  * project's own generated code for golden-value correctness testing, and
  * must never be used as a substitute for Avrora's real energy numbers or

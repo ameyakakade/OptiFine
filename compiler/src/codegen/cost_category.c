@@ -98,6 +98,10 @@ static const struct { const char *mnemonic; int cycles; } kDirectCycles[] = {
      * reaches +/-64 words; a DSP butterfly body is several hundred bytes, so
      * a long loop closes with an inverted BREQ over an RJMP instead. */
     {"rjmp", 2},
+    /* JMP is RJMP's long form: 3 cycles, two words, reaching all of flash.
+     * Only the generic MIR selector emits it, for a branch beyond RJMP's
+     * +/-2K words (avr_mir.c). */
+    {"jmp", 3},
     /* BREAK halts the simulator and costs 1 cycle. This is the "+1 fixed
      * harness overhead" of every simulated program
      * (sim/fixtures/active_ml/smoke.avrora.txt: 7 instruction cycles, 8
@@ -121,7 +125,7 @@ static const struct { const char *mnemonic; int cycles; } kAvrCycles[] = {
     {"adiw", 2}, {"sbiw", 2},
     {"lds", 2},  {"sts", 2},  {"ld", 2},   {"ldd", 2},  {"st", 2},   {"std", 2},
     {"lpm", 3},
-    {"brne", 2}, {"breq", 2}, {"rjmp", 2},
+    {"brne", 2}, {"breq", 2}, {"rjmp", 2}, {"jmp", 3},
     {"break", 1},
 };
 

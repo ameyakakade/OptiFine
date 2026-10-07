@@ -184,6 +184,7 @@ typedef struct {
     int open;
     unsigned hops;
     int failed;
+    const uint8_t *long_jump; /* per block x JUMP_SLOTS: emit jmp, not rjmp */
 } Sel;
 
 static void reg(char *o, int r) { fmt_reg(o, r); }
@@ -298,6 +299,107 @@ static void load_x(InstrBuf *b, Sel *s, uint32_t p, int32_t offset) {
 
 static void block_label(char *out, uint32_t fn, uint32_t block) {
     snprintf(out, AVR_OPERAND_LEN, ".Lf%ub%u", (unsigned)fn, (unsigned)block);
+}
+
+static void exit_label(char *out, uint32_t fn) {
+    snprintf(out, AVR_OPERAND_LEN, ".Lf%ux", (unsigned)fn);
+}
+
+/* ---- branch reach ----
+ *
+ * A block's terminator jumps at most twice: to a block (slot 0: br's target
+ * or cbr's taken edge; slot 1: cbr's other edge) or to the function's exit
+ * (slot 2: ret from any block but the last). Each jump is an rjmp, which
+ * reaches -2048..+2047 words from the instruction after it, unless its slot
+ * is marked long, when it is a jmp (two words, 3 cycles, all of flash).
+ * Conditional branches never need reach: cbr's breq only hops the one jump
+ * after it. Selection starts with every slot short, lays the function out in
+ * flash words, marks the slots whose rjmp falls short, and selects again
+ * until nothing changes. Marking only ever lengthens code, so each round
+ * marks at least one new slot or ends, and a jump marked long stays long. */
+#define JUMP_SLOTS 3
+#define RJMP_MIN_WORDS (-2048L)
+#define RJMP_MAX_WORDS 2047L
+
+/* Block id of `label` if it is one of function `fn`'s block labels. */
+static int parse_block_label(const char *label, uint32_t fn, uint32_t *block) {
+    char prefix[AVR_OPERAND_LEN];
+    int n = snprintf(prefix, sizeof(prefix), ".Lf%ub", (unsigned)fn);
+    if (strncmp(label, prefix, (size_t)n) != 0) return 0;
+    const char *digits = label + n;
+    if (*digits < '0' || *digits > '9') return 0;
+    char *end;
+    unsigned long v = strtoul(digits, &end, 10);
+    if (*end != '\0' || v > UINT32_MAX) return 0;
+    *block = (uint32_t)v;
+    return 1;
+}
+
+/* Marks the slots of `code` (function `fn`, `num_blocks` blocks) whose rjmp
+ * does not reach its label. Returns how many it newly marked, or (size_t)-1
+ * when out of memory. */
+static size_t mark_long_jumps(const AvrMirCode *code, uint32_t fn, size_t num_blocks, uint8_t *long_jump) {
+    long *block_word = malloc(num_blocks * sizeof(long));
+    if (!block_word) return (size_t)-1;
+    for (size_t b = 0; b < num_blocks; b++) block_word[b] = -1;
+    long exit_word = -1, words = 0;
+    char exit_name[AVR_OPERAND_LEN];
+    exit_label(exit_name, fn);
+    for (size_t g = 0; g < code->count; g++) {
+        const Candidate *c = &code->segments[g].code;
+        for (size_t i = 0; i < c->num_instructions; i++) {
+            const AvrInstr *in = &c->instructions[i];
+            uint32_t b;
+            if (avr_instr_is_label(in)) {
+                if (parse_block_label(in->operands[0], fn, &b) && b < num_blocks) block_word[b] = words;
+                if (strcmp(in->operands[0], exit_name) == 0) exit_word = words;
+            }
+            words += (long)(avr_instr_flash_bytes(in) / 2);
+        }
+    }
+
+    size_t marked = 0;
+    uint32_t block = 0;
+    unsigned ordinal = 0;
+    words = 0;
+    for (size_t g = 0; g < code->count; g++) {
+        const Candidate *c = &code->segments[g].code;
+        for (size_t i = 0; i < c->num_instructions; i++) {
+            const AvrInstr *in = &c->instructions[i];
+            uint32_t b;
+            if (avr_instr_is_label(in) && parse_block_label(in->operands[0], fn, &b)) {
+                block = b;
+                ordinal = 0;
+            }
+            int is_rjmp = strcmp(in->mnemonic, "rjmp") == 0;
+            if ((is_rjmp || strcmp(in->mnemonic, "jmp") == 0) && in->num_operands == 1) {
+                long target = -1;
+                size_t slot = JUMP_SLOTS;
+                if (parse_block_label(in->operands[0], fn, &b) && b < num_blocks) {
+                    target = block_word[b];
+                    slot = ordinal++;
+                } else if (strcmp(in->operands[0], exit_name) == 0) {
+                    target = exit_word;
+                    slot = 2;
+                }
+                if (slot < JUMP_SLOTS && target >= 0 && is_rjmp) {
+                    long k = target - (words + 1);
+                    if ((k < RJMP_MIN_WORDS || k > RJMP_MAX_WORDS) && !long_jump[block * JUMP_SLOTS + slot]) {
+                        long_jump[block * JUMP_SLOTS + slot] = 1;
+                        marked++;
+                    }
+                }
+            }
+            words += (long)(avr_instr_flash_bytes(in) / 2);
+        }
+    }
+    free(block_word);
+    return marked;
+}
+
+/* The jump in `slot` of block `b`: rjmp, or jmp once marked long. */
+static void jump(Sel *s, InstrBuf *b, uint32_t b_id, size_t slot, const char *label) {
+    ins1(b, s->long_jump[(size_t)b_id * JUMP_SLOTS + slot] ? "jmp" : "rjmp", label);
 }
 
 static int select_inst(Sel *s, const MirInst *in, const MirBlock *block, size_t index, size_t *skip) {
@@ -535,23 +637,23 @@ static int select_terminator(Sel *s, uint32_t b_id, const MirTerminator *t, int 
         case MIR_TERM_BR:
             if (t->then_block != next) {
                 block_label(l, s->fn_id, t->then_block);
-                ins1(b, "rjmp", l);
+                jump(s, b, b_id, 0, l);
             }
             return 0;
         case MIR_TERM_CBR: {
-            /* breq hops one word over the taken edge's rjmp, so no
-             * conditional branch ever needs more than a one-word reach. */
+            /* breq hops over the taken edge's jump (one or two words), so no
+             * conditional branch ever needs more reach than that. */
             char hop[AVR_OPERAND_LEN];
             snprintf(hop, AVR_OPERAND_LEN, ".Lf%uh%u", (unsigned)s->fn_id, s->hops++);
             load_byte(b, R_A, s, t->cond, 0);
             op2(b, "cp", R_A, REG_ZERO);
             ins1(b, "breq", hop);
             block_label(l, s->fn_id, t->then_block);
-            ins1(b, "rjmp", l);
+            jump(s, b, b_id, 0, l);
             ins1(b, AVR_LABEL_MNEMONIC, hop);
             if (t->else_block != next) {
                 block_label(l, s->fn_id, t->else_block);
-                ins1(b, "rjmp", l);
+                jump(s, b, b_id, 1, l);
             }
             return 0;
         }
@@ -564,8 +666,8 @@ static int select_terminator(Sel *s, uint32_t b_id, const MirTerminator *t, int 
                 }
             }
             if (b_id + 1 != s->fn->num_blocks) {
-                snprintf(r, AVR_OPERAND_LEN, ".Lf%ux", (unsigned)s->fn_id);
-                ins1(b, "rjmp", r);
+                exit_label(r, s->fn_id);
+                jump(s, b, b_id, 2, r);
                 *needs_exit = 1;
             }
             return 0;
@@ -605,15 +707,10 @@ void avr_mir_code_free(AvrMirCode *code) {
     memset(code, 0, sizeof(*code));
 }
 
-int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout, uint32_t fn_id,
-                            int entry_prologue, const CostModel *cost_model, AvrMirCode *out) {
+/* One selection of function `fn_id` with the given long-jump slots. */
+static int select_once(const MirModule *module, const AvrMirLayout *layout, uint32_t fn_id, int entry_prologue,
+                       const CostModel *cost_model, const uint8_t *long_jump, AvrMirCode *out) {
     memset(out, 0, sizeof(*out));
-    if (require_verified(module, "selection") != 0 || !layout_matches(module, layout)) return -1;
-    if (fn_id >= module->num_functions) {
-        fprintf(stderr, "avr_mir: selection: function %u does not exist\n", (unsigned)fn_id);
-        return -1;
-    }
-    if (!layout_complete(module, layout, fn_id)) return -1;
     Sel s;
     memset(&s, 0, sizeof(s));
     s.m = module;
@@ -622,6 +719,7 @@ int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout,
     s.fn_id = fn_id;
     s.fn = &module->functions[fn_id];
     s.out = out;
+    s.long_jump = long_jump;
 
     if (entry_prologue) {
         char r[AVR_OPERAND_LEN];
@@ -650,7 +748,7 @@ int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout,
     }
     if (!s.failed && needs_exit) {
         char l[AVR_OPERAND_LEN];
-        snprintf(l, AVR_OPERAND_LEN, ".Lf%ux", (unsigned)fn_id);
+        exit_label(l, fn_id);
         ins1(seg(&s, s.open ? s.origin : MIR_NONE), AVR_LABEL_MNEMONIC, l);
     }
     if (!s.failed) flush(&s);
@@ -659,7 +757,40 @@ int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout,
         avr_mir_code_free(out);
         return -1;
     }
+    out->straight_line = s.fn->num_blocks == 1;
     return 0;
+}
+
+int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout, uint32_t fn_id,
+                            int entry_prologue, const CostModel *cost_model, AvrMirCode *out) {
+    memset(out, 0, sizeof(*out));
+    if (require_verified(module, "selection") != 0 || !layout_matches(module, layout)) return -1;
+    if (fn_id >= module->num_functions) {
+        fprintf(stderr, "avr_mir: selection: function %u does not exist\n", (unsigned)fn_id);
+        return -1;
+    }
+    if (!layout_complete(module, layout, fn_id)) return -1;
+    size_t num_blocks = module->functions[fn_id].num_blocks;
+    uint8_t *long_jump = calloc(num_blocks * JUMP_SLOTS, 1);
+    if (!long_jump) {
+        fprintf(stderr, "avr_mir: selection: out of memory\n");
+        return -1;
+    }
+    int rc;
+    for (;;) {
+        rc = select_once(module, layout, fn_id, entry_prologue, cost_model, long_jump, out);
+        if (rc != 0) break;
+        size_t marked = mark_long_jumps(out, fn_id, num_blocks, long_jump);
+        if (marked == 0) break;
+        avr_mir_code_free(out);
+        if (marked == (size_t)-1) {
+            fprintf(stderr, "avr_mir: selection: out of memory\n");
+            rc = -1;
+            break;
+        }
+    }
+    free(long_jump);
+    return rc;
 }
 
 int avr_mir_select_constants(const MirModule *module, const CostModel *cost_model, Candidate *out) {

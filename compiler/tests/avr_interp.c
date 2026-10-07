@@ -82,6 +82,7 @@ static int avr_interp_cycles(const AvrInstr *ins, int taken) {
     if (avr_instr_is_label(ins) || avr_instr_is_data_word(ins)) return 0;
     if (!strcmp(m, "brne") || !strcmp(m, "breq")) return taken ? 2 : 1;
     if (!strcmp(m, "rjmp")) return 2;
+    if (!strcmp(m, "jmp")) return 3;
     if (!strcmp(m, "lpm")) return 3;
     if (!strcmp(m, "lds") || !strcmp(m, "sts")) return 2;
     if (!strcmp(m, "ld") || !strcmp(m, "st") ||
@@ -338,7 +339,7 @@ int avr_interp_step(AvrInterp *interp, const AvrInstr *instr) {
         interp->zero = (r[rd] == 0) ? 1 : 0; /* dec does not touch Carry */
         return 0;
     }
-    if (strcmp(m, "brne") == 0 || strcmp(m, "breq") == 0 || strcmp(m, "rjmp") == 0) {
+    if (strcmp(m, "brne") == 0 || strcmp(m, "breq") == 0 || strcmp(m, "rjmp") == 0 || strcmp(m, "jmp") == 0) {
         return 0; /* control flow -- handled by avr_interp_run */
     }
     if (strcmp(m, "movw") == 0) {
@@ -460,7 +461,7 @@ int avr_interp_run(AvrInterp *interp, const Candidate *candidate) {
         }
         int is_brne = !strcmp(ins->mnemonic, "brne");
         int is_breq = !strcmp(ins->mnemonic, "breq");
-        int is_rjmp = !strcmp(ins->mnemonic, "rjmp");
+        int is_rjmp = !strcmp(ins->mnemonic, "rjmp") || !strcmp(ins->mnemonic, "jmp");
         int take = is_rjmp || (is_brne && !interp->zero) || (is_breq && interp->zero);
         interp->cycles += avr_interp_cycles(ins, (is_brne || is_breq) ? take : 0);
         if (!avr_instr_is_label(ins)) interp->instructions++;

@@ -222,9 +222,10 @@ void instrbuf_loop_begin_sram(InstrBuf *b, LoopCtx *ctx, uint32_t trip, uint16_t
 size_t avr_instr_flash_bytes(const AvrInstr *ins) {
     if (avr_instr_is_label(ins)) return 0;
     if (avr_instr_is_data_word(ins)) return 2;
-    /* lds/sts with a 16-bit address are the only 32-bit encodings this
-     * project emits; everything else is a single 16-bit word. */
-    if (!strcmp(ins->mnemonic, "lds") || !strcmp(ins->mnemonic, "sts")) return 4;
+    /* lds/sts with a 16-bit address and jmp with a 22-bit one are the only
+     * 32-bit encodings this project emits; everything else is a single 16-bit
+     * word. */
+    if (!strcmp(ins->mnemonic, "lds") || !strcmp(ins->mnemonic, "sts") || !strcmp(ins->mnemonic, "jmp")) return 4;
     return 2;
 }
 
