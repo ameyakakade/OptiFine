@@ -256,6 +256,55 @@ int mir_emit_target(MirModule *m, uint32_t fn, uint32_t block, MirTargetCode *co
     return 0;
 }
 
+unsigned mir_opcode_fields(MirOpcode op) {
+    switch (op) {
+        case MIR_CONST:
+        case MIR_COPY:
+        case MIR_ZEXT:
+        case MIR_SEXT:
+        case MIR_TRUNC:
+            return MIR_FIELD_DST | MIR_FIELD_A;
+        case MIR_ADD:
+        case MIR_SUB:
+        case MIR_MUL:
+        case MIR_AND:
+        case MIR_OR:
+        case MIR_XOR:
+        case MIR_CMP:
+        case MIR_PTR_ADD:
+            return MIR_FIELD_DST | MIR_FIELD_A | MIR_FIELD_B;
+        case MIR_LOAD:
+        case MIR_ADDR:
+            return MIR_FIELD_DST | MIR_FIELD_ADDR;
+        case MIR_STORE:
+            return MIR_FIELD_A | MIR_FIELD_ADDR;
+        case MIR_TARGET:
+            return MIR_FIELD_TARGET;
+    }
+    return 0;
+}
+
+size_t mir_inst_uses(const MirInst *inst, uint32_t used[3]) {
+    unsigned fields = mir_opcode_fields(inst->op);
+    size_t n = 0;
+    if ((fields & MIR_FIELD_A) && inst->a.kind == MIR_OPND_VALUE) used[n++] = inst->a.value;
+    if ((fields & MIR_FIELD_B) && inst->b.kind == MIR_OPND_VALUE) used[n++] = inst->b.value;
+    if ((fields & MIR_FIELD_ADDR) && inst->op != MIR_ADDR && inst->addr.pointer != MIR_NONE) {
+        used[n++] = inst->addr.pointer;
+    }
+    return n;
+}
+
+uint32_t mir_inst_def(const MirInst *inst) {
+    return (mir_opcode_fields(inst->op) & MIR_FIELD_DST) ? inst->dst : MIR_NONE;
+}
+
+uint32_t mir_term_use(const MirTerminator *term) {
+    if (term->kind == MIR_TERM_CBR && term->cond.kind == MIR_OPND_VALUE) return term->cond.value;
+    if (term->kind == MIR_TERM_RET && term->value.kind == MIR_OPND_VALUE) return term->value.value;
+    return MIR_NONE;
+}
+
 void mir_br(MirModule *m, uint32_t fn, uint32_t block, uint32_t target) {
     MirTerminator t = {MIR_TERM_BR, mir_none(), target, MIR_NONE, mir_none()};
     mir_set_terminator(m, fn, block, &t);

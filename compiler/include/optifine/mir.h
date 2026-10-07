@@ -238,11 +238,47 @@ void mir_ret(MirModule *m, uint32_t fn, uint32_t block, MirOperand value);
 /* Frees a MirTargetCode and its payload. */
 void mir_target_code_free(MirTargetCode *code);
 
+/* ---- Fields each opcode uses ----
+ *
+ *   opcode                     dst  a              b              addr  target
+ *   CONST                      yes  immediate      -              -     -
+ *   COPY                       yes  value/imm      -              -     -
+ *   ADD SUB MUL AND OR XOR CMP yes  value/imm      value/imm      -     -
+ *   ZEXT SEXT TRUNC            yes  value          -              -     -
+ *   LOAD, ADDR                 yes  -              -              yes   -
+ *   STORE                      -    value/imm      -              yes   -
+ *   PTR_ADD                    yes  value (PTR)    value/imm      -     -
+ *   TARGET                     -    -              -              -     yes
+ *
+ *   terminator  cond         then_block  else_block  value
+ *   br          -            yes         -           -
+ *   cbr         value (I8)   yes         yes         -
+ *   ret         -            -           -           value/imm, or - for void
+ *
+ * A field marked "-" must hold its empty form: MIR_NONE for a value or
+ * block id, mir_none() for an operand, mir_at_object(MIR_NONE, 0) for an
+ * address, NULL for a target. The builder calls above always produce that;
+ * mir_verify rejects anything else, so no consumer ever has to wonder
+ * whether a stray id in an unused field is meaningful. */
+enum { MIR_FIELD_DST = 1, MIR_FIELD_A = 2, MIR_FIELD_B = 4, MIR_FIELD_ADDR = 8, MIR_FIELD_TARGET = 16 };
+/* The MIR_FIELD_* set `op` uses; 0 for an unknown opcode. */
+unsigned mir_opcode_fields(MirOpcode op);
+/* The values `inst` reads, in operand order (at most 3), stored in `used`.
+ * Only fields the opcode uses are considered. */
+size_t mir_inst_uses(const MirInst *inst, uint32_t used[3]);
+/* The value `inst` assigns, or MIR_NONE. */
+uint32_t mir_inst_def(const MirInst *inst);
+/* The value a terminator reads (cbr's condition, ret's value), or MIR_NONE. */
+uint32_t mir_term_use(const MirTerminator *term);
+
 /* ---- Verification ----
  *
  * Returns 0 when the module is well formed; otherwise -1 with a one-line
  * diagnostic in `message` (capacity `message_len`, may be 0). Checks:
  *   - the module was built without running out of memory
+ *   - every instruction and terminator is in canonical form: each field its
+ *     opcode or kind does not use holds the empty form (the table above), so
+ *     a stray id in an unused field is an error, never silently ignored
  *   - objects: nonzero size, unique non-empty names; CONST objects carry an
  *     initializer of exactly their size, other kinds none; STACK objects name
  *     an existing owner function

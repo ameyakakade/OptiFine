@@ -130,6 +130,86 @@ int main(void) {
     m.out_of_memory = 1;
     expect_reject(&m, "out of memory", "construction out of memory");
 
+    /* --- noncanonical fields: an id in a field the opcode or terminator
+     * does not use. Each of the first four once made mir_verify itself read
+     * or write out of bounds; all must be rejected with a diagnostic. --- */
+#define FAR 1000000u
+    f = FRESH(mirp_load_store); m.functions[f].blocks[0].insts[3].dst = FAR; /* store */
+    expect_reject(&m, "assigns no value", "store with a stray destination");
+    mir_module_init(&m);
+    f = mir_add_function(&m, "region", MIR_TYPE_VOID);
+    {
+        static int payload;
+        uint32_t b = mir_add_block(&m, f);
+        MirTargetCode *t = calloc(1, sizeof(*t));
+        assert(t);
+        t->target = "avr";
+        t->payload = &payload;
+        mir_emit_target(&m, f, b, t, 0);
+        mir_ret(&m, f, b, mir_none());
+        verify_ok(&m);
+        m.functions[f].blocks[0].insts[0].dst = FAR;
+    }
+    expect_reject(&m, "assigns no value", "target region with a stray destination");
+    f = FRESH(mirp_loop); m.functions[f].blocks[0].insts[0].op = MIR_COPY; /* i = 0 as a copy */
+    m.functions[f].blocks[0].insts[0].b = mir_value(FAR);
+    expect_reject(&m, "no second operand", "copy with a stray second operand");
+    f = FRESH(mirp_diamond); m.functions[f].blocks[1].term.cond = mir_value(FAR);
+    expect_reject(&m, "only cbr takes a condition", "br with a stray condition");
+
+    /* Neighbouring families: unused fields of other opcodes and terminators. */
+    f = FRESH(mirp_load_store); m.functions[f].blocks[0].insts[3].dst = 0; /* even a real value */
+    expect_reject(&m, "assigns no value", "store naming an existing value");
+    f = FRESH(mirp_load_store); m.functions[f].blocks[0].insts[0].a = mir_value(FAR);
+    expect_reject(&m, "no first operand", "load with a stray operand");
+    f = FRESH(mirp_load_store); m.functions[f].blocks[0].insts[3].b = mir_imm(1);
+    expect_reject(&m, "no second operand", "store with a second operand");
+    f = FRESH(mirp_arith32); m.functions[f].blocks[0].insts[0].addr = mir_at_pointer(FAR, 0);
+    expect_reject(&m, "takes no address", "add with a stray address");
+    f = FRESH(mirp_loop); m.functions[f].blocks[2].insts[3].b = mir_value(0); /* zext */
+    expect_reject(&m, "no second operand", "conversion with a second operand");
+    f = FRESH(mirp_loop); m.functions[f].blocks[0].insts[0].b = mir_imm(3); /* const */
+    expect_reject(&m, "no second operand", "const with a second operand");
+    f = FRESH(mirp_loop); m.functions[f].blocks[0].insts[2].a = mir_value(FAR); /* addr */
+    expect_reject(&m, "no first operand", "addr with a stray operand");
+    f = FRESH(mirp_loop); m.functions[f].blocks[2].insts[5].addr = mir_at_object(0, 0); /* ptr_add */
+    expect_reject(&m, "takes no address", "ptr_add with an address");
+    {
+        MirTargetCode stray = {0};
+        f = FRESH(mirp_arith32);
+        m.functions[f].blocks[0].insts[0].target = &stray;
+        expect_reject(&m, "only a target region", "add carrying target code");
+    }
+    f = FRESH(mirp_arith32); m.functions[f].blocks[0].insts[0].a.kind = (MirOperandKind)7;
+    expect_reject(&m, "unknown kind", "operand of an unknown kind");
+    f = FRESH(mirp_arith32); m.functions[f].blocks[0].insts[0].op = (MirOpcode)99;
+    expect_reject(&m, "unknown opcode", "unknown opcode");
+
+    /* Invalid ids in fields that are used. */
+    f = FRESH(mirp_arith32); m.functions[f].blocks[0].insts[0].dst = FAR;
+    expect_reject(&m, "does not exist", "add into a missing value");
+    f = FRESH(mirp_loop); m.functions[f].blocks[2].insts[1].addr.pointer = FAR; /* store through p */
+    expect_reject(&m, "does not exist", "store through a missing pointer");
+    f = FRESH(mirp_diamond); m.functions[f].blocks[0].term.cond = mir_value(FAR);
+    expect_reject(&m, "does not exist", "cbr on a missing value");
+    f = FRESH(mirp_arith32); m.functions[f].blocks[0].term.value = mir_value(FAR);
+    expect_reject(&m, "does not exist", "ret of a missing value");
+
+    /* Malformed terminators. */
+    f = FRESH(mirp_diamond); m.functions[f].blocks[3].term.kind = (MirTermKind)42;
+    expect_reject(&m, "no terminator", "terminator of an unknown kind");
+    f = FRESH(mirp_diamond); m.functions[f].blocks[1].term.value = mir_value(0);
+    expect_reject(&m, "only ret takes a value", "br carrying a value");
+    f = FRESH(mirp_diamond); m.functions[f].blocks[1].term.else_block = 2;
+    expect_reject(&m, "does not use", "br naming a second successor");
+    f = FRESH(mirp_diamond); m.functions[f].blocks[3].term.then_block = 0;
+    expect_reject(&m, "does not use", "ret naming a successor");
+    f = FRESH(mirp_diamond); m.functions[f].blocks[0].term.value = mir_imm(1);
+    expect_reject(&m, "only ret takes a value", "cbr carrying a value");
+    f = FRESH(mirp_diamond); m.functions[f].blocks[0].term.cond.kind = (MirOperandKind)9;
+    expect_reject(&m, "unknown kind", "condition of an unknown kind");
+#undef FAR
+
     printf("test_mir: all tests passed\n");
     return 0;
 }

@@ -105,7 +105,44 @@ static int check_address(Ctx *c, MirAddress addr, size_t bytes, int is_store) {
     return 0;
 }
 
+static int operand_kind_ok(MirOperand o) {
+    return o.kind == MIR_OPND_NONE || o.kind == MIR_OPND_VALUE || o.kind == MIR_OPND_IMM;
+}
+
+static int address_empty(MirAddress a) {
+    return a.object == MIR_NONE && a.pointer == MIR_NONE && a.offset == 0;
+}
+
+/* Every field the opcode does not use holds its empty form (mir.h, "Fields
+ * each opcode uses"). Checked before anything reads a field, so the checks
+ * below and the dataflow only ever see ids in fields that mean something. */
+static int check_shape(Ctx *c, const MirInst *in) {
+    unsigned fields = mir_opcode_fields(in->op);
+    if (fields == 0) return fail(c->d, WHERE "unknown opcode %d", AT(c), (int)in->op);
+    if (!operand_kind_ok(in->a) || !operand_kind_ok(in->b)) {
+        return fail(c->d, WHERE "operand of unknown kind", AT(c));
+    }
+    if (!(fields & MIR_FIELD_DST) && in->dst != MIR_NONE) {
+        return fail(c->d, WHERE "this opcode assigns no value, but its destination names value %u", AT(c),
+                    (unsigned)in->dst);
+    }
+    if (!(fields & MIR_FIELD_A) && in->a.kind != MIR_OPND_NONE) {
+        return fail(c->d, WHERE "this opcode takes no first operand, but one is set", AT(c));
+    }
+    if (!(fields & MIR_FIELD_B) && in->b.kind != MIR_OPND_NONE) {
+        return fail(c->d, WHERE "this opcode takes no second operand, but one is set", AT(c));
+    }
+    if (!(fields & MIR_FIELD_ADDR) && !address_empty(in->addr)) {
+        return fail(c->d, WHERE "this opcode takes no address, but one is set", AT(c));
+    }
+    if (!(fields & MIR_FIELD_TARGET) && in->target != NULL) {
+        return fail(c->d, WHERE "only a target region carries target code", AT(c));
+    }
+    return 0;
+}
+
 static int check_inst(Ctx *c, const MirInst *in) {
+    if (check_shape(c, in) != 0) return -1;
     switch (in->op) {
         case MIR_CONST:
             if (!is_int_type(in->type) || in->a.kind != MIR_OPND_IMM) {
@@ -177,6 +214,10 @@ static int check_inst(Ctx *c, const MirInst *in) {
         case MIR_TARGET: {
             const MirTargetCode *t = in->target;
             if (!t || !t->target || !t->payload) return fail(c->d, WHERE "target region without code", AT(c));
+            if (in->type != MIR_TYPE_VOID) return fail(c->d, WHERE "target region with a type", AT(c));
+            if ((t->num_reads && !t->reads) || (t->num_writes && !t->writes)) {
+                return fail(c->d, WHERE "target region with a missing read or write list", AT(c));
+            }
             for (size_t i = 0; i < t->num_reads; i++) {
                 if (check_object(c, t->reads[i]) != 0) return -1;
             }
@@ -194,6 +235,24 @@ static int check_inst(Ctx *c, const MirInst *in) {
 
 static int check_terminator(Ctx *c, const MirTerminator *t) {
     size_t blocks = c->fn->num_blocks;
+    if (t->kind != MIR_TERM_BR && t->kind != MIR_TERM_CBR && t->kind != MIR_TERM_RET) {
+        return fail(c->d, WHERE "block has no terminator", AT(c));
+    }
+    /* As for instructions: fields this kind does not use hold their empty
+     * form (mir.h). */
+    if (!operand_kind_ok(t->cond) || !operand_kind_ok(t->value)) {
+        return fail(c->d, WHERE "terminator operand of unknown kind", AT(c));
+    }
+    if (t->kind != MIR_TERM_CBR && t->cond.kind != MIR_OPND_NONE) {
+        return fail(c->d, WHERE "only cbr takes a condition", AT(c));
+    }
+    if (t->kind != MIR_TERM_RET && t->value.kind != MIR_OPND_NONE) {
+        return fail(c->d, WHERE "only ret takes a value", AT(c));
+    }
+    if ((t->kind == MIR_TERM_RET && t->then_block != MIR_NONE) ||
+        (t->kind != MIR_TERM_CBR && t->else_block != MIR_NONE)) {
+        return fail(c->d, WHERE "terminator names a successor block it does not use", AT(c));
+    }
     switch (t->kind) {
         case MIR_TERM_BR:
             if (t->then_block >= blocks) return fail(c->d, WHERE "branch to a block that does not exist", AT(c));
@@ -223,36 +282,39 @@ typedef struct {
     size_t values;
 } DefSets;
 
-static int uses_value(MirOperand o, uint32_t *v) {
-    if (o.kind != MIR_OPND_VALUE) return 0;
-    *v = o.value;
-    return 1;
-}
-
-/* Applies block `b` to the defined set `def` (in place). With `c` set,
- * reports the first use of a value not in the set. */
-static int transfer(Ctx *c, const MirBlock *block, uint8_t *def) {
+/* Applies block `b` (of c->fn) to the defined set `def` (in place). Reads
+ * only the fields each opcode uses (mir_inst_uses / mir_inst_def /
+ * mir_term_use), and bounds-checks every id before it indexes `def`; the
+ * structural checks have already rejected out-of-range ids, so a failure here
+ * is a verifier bug, reported rather than acted on. With `report`, also fails
+ * on the first use of a value not in the set. */
+static int transfer(Ctx *c, size_t b, uint8_t *def, int report) {
+    const MirBlock *block = &c->fn->blocks[b];
+    size_t nv = c->fn->num_values;
+    c->block = b;
     for (size_t i = 0; i < block->count; i++) {
         const MirInst *in = &block->insts[i];
         uint32_t used[3];
-        size_t n = 0;
-        uint32_t v;
-        if (uses_value(in->a, &v)) used[n++] = v;
-        if (uses_value(in->b, &v)) used[n++] = v;
-        if ((in->op == MIR_LOAD || in->op == MIR_STORE) && in->addr.pointer != MIR_NONE) used[n++] = in->addr.pointer;
-        for (size_t k = 0; c && k < n; k++) {
-            if (!def[used[k]]) {
-                c->inst = i;
+        size_t n = mir_inst_uses(in, used);
+        c->inst = i;
+        for (size_t k = 0; k < n; k++) {
+            if (used[k] >= nv) return fail(c->d, WHERE "uses value %u, which does not exist", AT(c), (unsigned)used[k]);
+            if (report && !def[used[k]]) {
                 return fail(c->d, WHERE "uses value %u before any assignment reaches it", AT(c),
                             (unsigned)used[k]);
             }
         }
-        if (in->dst != MIR_NONE) def[in->dst] = 1;
+        uint32_t dst = mir_inst_def(in);
+        if (dst != MIR_NONE) {
+            if (dst >= nv) return fail(c->d, WHERE "assigns value %u, which does not exist", AT(c), (unsigned)dst);
+            def[dst] = 1;
+        }
     }
-    uint32_t v;
-    if (c) {
-        c->inst = block->count;
-        if ((uses_value(block->term.cond, &v) || uses_value(block->term.value, &v)) && !def[v]) {
+    c->inst = block->count;
+    uint32_t v = mir_term_use(&block->term);
+    if (v != MIR_NONE) {
+        if (v >= nv) return fail(c->d, WHERE "terminator uses value %u, which does not exist", AT(c), (unsigned)v);
+        if (report && !def[v]) {
             return fail(c->d, WHERE "terminator uses value %u before any assignment reaches it", AT(c),
                         (unsigned)v);
         }
@@ -260,12 +322,23 @@ static int transfer(Ctx *c, const MirBlock *block, uint8_t *def) {
     return 0;
 }
 
+/* The successors of a (structurally checked) terminator. */
+static size_t successors(const MirTerminator *t, uint32_t succ[2]) {
+    size_t n = 0;
+    if (t->kind == MIR_TERM_BR || t->kind == MIR_TERM_CBR) succ[n++] = t->then_block;
+    if (t->kind == MIR_TERM_CBR) succ[n++] = t->else_block;
+    return n;
+}
+
 static int check_definitions(Ctx *c) {
     const MirFunction *fn = c->fn;
     size_t nv = fn->num_values, nb = fn->num_blocks;
     if (nv == 0) return 0;
+    if (nb > SIZE_MAX / nv) return fail(c->d, "function %s is too large to verify", fn->name);
     /* in[b]: values assigned on every path to the start of b. Start at
-     * "everything" for all but the entry and intersect down to a fixpoint. */
+     * "everything" for all but the entry -- whose only incoming state is the
+     * function start, with just the parameters assigned; a back edge into the
+     * entry intersects with that -- and intersect down to a fixpoint. */
     uint8_t *in = malloc(nb * nv);
     uint8_t *reached = calloc(nb, 1);
     uint8_t *tmp = malloc(nv);
@@ -280,30 +353,26 @@ static int check_definitions(Ctx *c) {
     for (size_t p = 0; p < fn->num_params; p++) in[p] = 1;
     reached[0] = 1;
 
-    int changed = 1;
-    while (changed) {
+    int rc = 0, changed = 1;
+    while (changed && rc == 0) {
         changed = 0;
-        for (size_t b = 0; b < nb; b++) {
+        for (size_t b = 0; b < nb && rc == 0; b++) {
             if (!reached[b]) continue;
             memcpy(tmp, in + b * nv, nv);
-            transfer(NULL, &fn->blocks[b], tmp);
-            const MirTerminator *t = &fn->blocks[b].term;
+            rc = transfer(c, b, tmp, 0);
             uint32_t succ[2];
-            size_t ns = 0;
-            if (t->kind == MIR_TERM_BR) succ[ns++] = t->then_block;
-            if (t->kind == MIR_TERM_CBR) {
-                succ[ns++] = t->then_block;
-                succ[ns++] = t->else_block;
-            }
-            for (size_t s = 0; s < ns; s++) {
+            size_t ns = successors(&fn->blocks[b].term, succ);
+            for (size_t s = 0; s < ns && rc == 0; s++) {
+                if (succ[s] >= nb) {
+                    rc = fail(c->d, WHERE "branch to a block that does not exist", AT(c));
+                    break;
+                }
                 uint8_t *row = in + (size_t)succ[s] * nv;
                 if (!reached[succ[s]]) {
                     reached[succ[s]] = 1;
                     memcpy(row, tmp, nv);
-                    if (succ[s] != 0) {
-                        changed = 1;
-                        continue;
-                    }
+                    changed = 1;
+                    continue;
                 }
                 for (size_t v = 0; v < nv; v++) {
                     if (row[v] && !tmp[v]) {
@@ -315,12 +384,10 @@ static int check_definitions(Ctx *c) {
         }
     }
 
-    int rc = 0;
     for (size_t b = 0; b < nb && rc == 0; b++) {
         if (!reached[b]) continue; /* unreachable code has no path to check */
         memcpy(tmp, in + b * nv, nv);
-        c->block = b;
-        rc = transfer(c, &fn->blocks[b], tmp);
+        rc = transfer(c, b, tmp, 1);
     }
     free(in);
     free(reached);

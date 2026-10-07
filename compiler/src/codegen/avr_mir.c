@@ -96,13 +96,11 @@ static size_t count_uses(const MirFunction *fn, uint32_t value) {
     for (size_t b = 0; b < fn->num_blocks; b++) {
         const MirBlock *block = &fn->blocks[b];
         for (size_t i = 0; i < block->count; i++) {
-            const MirInst *in = &block->insts[i];
-            uses += (in->a.kind == MIR_OPND_VALUE && in->a.value == value);
-            uses += (in->b.kind == MIR_OPND_VALUE && in->b.value == value);
-            uses += ((in->op == MIR_LOAD || in->op == MIR_STORE) && in->addr.pointer == value);
+            uint32_t used[3];
+            size_t n = mir_inst_uses(&block->insts[i], used);
+            for (size_t k = 0; k < n; k++) uses += used[k] == value;
         }
-        uses += (block->term.cond.kind == MIR_OPND_VALUE && block->term.cond.value == value);
-        uses += (block->term.value.kind == MIR_OPND_VALUE && block->term.value.value == value);
+        uses += mir_term_use(&block->term) == value;
     }
     return uses;
 }
