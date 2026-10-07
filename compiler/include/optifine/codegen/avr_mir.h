@@ -67,10 +67,20 @@ typedef struct {
     uint16_t *object_addr;  /* per object; 0 = not yet placed (CONST objects stay 0) */
     uint16_t **value_slot;  /* per function, per value; 0 = needs no storage (folded) */
     uint16_t *return_slot;  /* per function; 0 for void */
+    size_t *num_values;     /* per function: its value count when the layout was made */
     size_t num_objects, num_functions;
 } AvrMirLayout;
 
-/* Allocates an empty layout for `module`. Returns 0 or -1 (out of memory). */
+/* Verification. Every function below that takes a module runs mir_verify on
+ * it first and refuses an invalid one with a diagnostic, so no caller can
+ * reach layout, selection or emission with malformed MIR by skipping its own
+ * verification call. Nothing records that a module was verified: a module
+ * changed after one call is verified again by the next. Selection also
+ * refuses a layout made for a different module, or before values or objects
+ * were added, and one that leaves an object or value without an address. */
+
+/* Allocates an empty layout for a verified `module`. Returns 0, or -1 with a
+ * diagnostic (invalid MIR, out of memory). */
 int avr_mir_layout_init(const MirModule *module, AvrMirLayout *layout);
 void avr_mir_layout_free(AvrMirLayout *layout);
 
@@ -79,11 +89,6 @@ void avr_mir_layout_free(AvrMirLayout *layout);
  * the first unused address in *end, or -1 with a diagnostic. */
 int avr_mir_layout_place_rest(const MirModule *module, AvrMirLayout *layout, uint16_t base, uint16_t limit,
                               uint16_t *end);
-
-/* True when `value` of function `fn` is a LOAD result consumed only by the
- * STORE that immediately follows it, so selection moves it through a
- * register and it needs no slot. */
-int avr_mir_value_folded(const MirModule *module, uint32_t fn, uint32_t value);
 
 /* One emitted piece of a function: a priced Candidate and the `origin` of
  * the MIR instructions it came from (MIR_NONE for code the backend adds

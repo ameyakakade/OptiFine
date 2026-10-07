@@ -17,6 +17,22 @@
 #define R_X 26            /* X: data pointers */
 #define R_Z 30            /* Z: program-memory reads */
 
+/* ---- the verification boundary ----
+ *
+ * Every public entry point below verifies the module it is handed before it
+ * reads anything else from it. Verification is linear in the module and
+ * repeated per call on purpose: a module can be changed between calls, and
+ * nothing here records "already verified" state that such a change would
+ * leave stale. */
+static int require_verified(const MirModule *module, const char *who) {
+    char message[256];
+    if (mir_verify(module, message, sizeof(message)) != 0) {
+        fprintf(stderr, "avr_mir: %s: refusing invalid MIR: %s\n", who, message);
+        return -1;
+    }
+    return 0;
+}
+
 /* ---- layout ---- */
 
 static size_t value_bytes(MirType t) {
@@ -25,17 +41,20 @@ static size_t value_bytes(MirType t) {
 
 int avr_mir_layout_init(const MirModule *module, AvrMirLayout *layout) {
     memset(layout, 0, sizeof(*layout));
+    if (require_verified(module, "layout") != 0) return -1;
     layout->num_objects = module->num_objects;
     layout->num_functions = module->num_functions;
     layout->object_addr = calloc(module->num_objects ? module->num_objects : 1, sizeof(uint16_t));
     layout->value_slot = calloc(module->num_functions ? module->num_functions : 1, sizeof(uint16_t *));
+    layout->num_values = calloc(module->num_functions ? module->num_functions : 1, sizeof(size_t));
     layout->return_slot = calloc(module->num_functions ? module->num_functions : 1, sizeof(uint16_t));
-    if (!layout->object_addr || !layout->value_slot || !layout->return_slot) {
+    if (!layout->object_addr || !layout->value_slot || !layout->num_values || !layout->return_slot) {
         avr_mir_layout_free(layout);
         return -1;
     }
     for (size_t f = 0; f < module->num_functions; f++) {
         size_t n = module->functions[f].num_values;
+        layout->num_values[f] = n;
         layout->value_slot[f] = calloc(n ? n : 1, sizeof(uint16_t));
         if (!layout->value_slot[f]) {
             avr_mir_layout_free(layout);
@@ -48,9 +67,21 @@ int avr_mir_layout_init(const MirModule *module, AvrMirLayout *layout) {
 void avr_mir_layout_free(AvrMirLayout *layout) {
     for (size_t f = 0; layout->value_slot && f < layout->num_functions; f++) free(layout->value_slot[f]);
     free(layout->value_slot);
+    free(layout->num_values);
     free(layout->object_addr);
     free(layout->return_slot);
     memset(layout, 0, sizeof(*layout));
+}
+
+static int value_folded(const MirModule *module, uint32_t f, uint32_t value);
+
+/* The layout was made for this module as it is now: same objects, functions
+ * and values. Anything added since has no address or slot. */
+static int layout_matches(const MirModule *module, const AvrMirLayout *layout) {
+    int ok = layout->num_objects == module->num_objects && layout->num_functions == module->num_functions;
+    for (size_t f = 0; ok && f < module->num_functions; f++) ok = layout->num_values[f] == module->functions[f].num_values;
+    if (!ok) fprintf(stderr, "avr_mir: the layout was made for a different module (or before it changed)\n");
+    return ok;
 }
 
 static int place(uint32_t *cursor, size_t bytes, uint16_t limit, uint16_t *out) {
@@ -62,6 +93,7 @@ static int place(uint32_t *cursor, size_t bytes, uint16_t limit, uint16_t *out) 
 
 int avr_mir_layout_place_rest(const MirModule *module, AvrMirLayout *layout, uint16_t base, uint16_t limit,
                               uint16_t *end) {
+    if (require_verified(module, "layout") != 0 || !layout_matches(module, layout)) return -1;
     uint32_t cursor = base;
     for (size_t i = 0; i < module->num_objects; i++) {
         if (module->objects[i].kind == MIR_MEM_CONST || layout->object_addr[i] != 0) continue;
@@ -73,7 +105,7 @@ int avr_mir_layout_place_rest(const MirModule *module, AvrMirLayout *layout, uin
     for (size_t f = 0; f < module->num_functions; f++) {
         const MirFunction *fn = &module->functions[f];
         for (size_t v = 0; v < fn->num_values; v++) {
-            if (avr_mir_value_folded(module, (uint32_t)f, (uint32_t)v)) continue;
+            if (value_folded(module, (uint32_t)f, (uint32_t)v)) continue;
             if (place(&cursor, value_bytes(fn->value_types[v]), limit, &layout->value_slot[f][v]) != 0) {
                 fprintf(stderr, "avr_mir: values of function %s do not fit in SRAM\n", fn->name);
                 return -1;
@@ -119,7 +151,10 @@ static int folds_into_next(const MirModule *m, const MirFunction *fn, const MirB
            st->a.kind == MIR_OPND_VALUE && st->a.value == ld->dst && count_uses(fn, ld->dst) == 1;
 }
 
-int avr_mir_value_folded(const MirModule *module, uint32_t f, uint32_t value) {
+/* True when `value` of function `f` is a LOAD result consumed only by the
+ * STORE that immediately follows it, so selection moves it through a
+ * register and it needs no slot. */
+static int value_folded(const MirModule *module, uint32_t f, uint32_t value) {
     const MirFunction *fn = &module->functions[f];
     if (value < fn->num_params) return 0;
     size_t defs = 0;
@@ -412,7 +447,7 @@ static int select_inst(Sel *s, const MirInst *in, const MirBlock *block, size_t 
             return 0;
         }
         case MIR_LOAD: {
-            int folded = folds_into_next(m, s->fn, block, index) && avr_mir_value_folded(m, s->fn_id, in->dst);
+            int folded = folds_into_next(m, s->fn, block, index) && value_folded(m, s->fn_id, in->dst);
             const MirInst *st = folded ? &block->insts[index + 1] : NULL;
             if (in->addr.pointer != MIR_NONE) {
                 load_x(b, s, in->addr.pointer, in->addr.offset);
@@ -540,6 +575,30 @@ static int select_terminator(Sel *s, uint32_t b_id, const MirTerminator *t, int 
     return refuse(s, "block without a terminator");
 }
 
+/* Every SRAM object, every value of `fn` that needs a slot, and its return
+ * value have an address: an unplaced one would read and write address 0,
+ * which on AVR is register r0. */
+static int layout_complete(const MirModule *module, const AvrMirLayout *layout, uint32_t fn) {
+    for (size_t i = 0; i < module->num_objects; i++) {
+        if (module->objects[i].kind != MIR_MEM_CONST && layout->object_addr[i] == 0) {
+            fprintf(stderr, "avr_mir: selection: object '%s' has no address\n", module->objects[i].name);
+            return 0;
+        }
+    }
+    const MirFunction *f = &module->functions[fn];
+    for (size_t v = 0; v < f->num_values; v++) {
+        if (layout->value_slot[fn][v] == 0 && !value_folded(module, fn, (uint32_t)v)) {
+            fprintf(stderr, "avr_mir: selection: value %zu of function %s has no slot\n", v, f->name);
+            return 0;
+        }
+    }
+    if (f->return_type != MIR_TYPE_VOID && layout->return_slot[fn] == 0) {
+        fprintf(stderr, "avr_mir: selection: function %s has no return slot\n", f->name);
+        return 0;
+    }
+    return 1;
+}
+
 void avr_mir_code_free(AvrMirCode *code) {
     for (size_t i = 0; i < code->count; i++) candidate_free(&code->segments[i].code);
     free(code->segments);
@@ -549,6 +608,12 @@ void avr_mir_code_free(AvrMirCode *code) {
 int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout, uint32_t fn_id,
                             int entry_prologue, const CostModel *cost_model, AvrMirCode *out) {
     memset(out, 0, sizeof(*out));
+    if (require_verified(module, "selection") != 0 || !layout_matches(module, layout)) return -1;
+    if (fn_id >= module->num_functions) {
+        fprintf(stderr, "avr_mir: selection: function %u does not exist\n", (unsigned)fn_id);
+        return -1;
+    }
+    if (!layout_complete(module, layout, fn_id)) return -1;
     Sel s;
     memset(&s, 0, sizeof(s));
     s.m = module;
@@ -598,6 +663,8 @@ int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout,
 }
 
 int avr_mir_select_constants(const MirModule *module, const CostModel *cost_model, Candidate *out) {
+    memset(out, 0, sizeof(*out));
+    if (require_verified(module, "constants") != 0) return -1;
     InstrBuf buf;
     instrbuf_init(&buf);
     for (size_t i = 0; i < module->num_objects; i++) {

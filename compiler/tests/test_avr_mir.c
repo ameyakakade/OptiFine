@@ -168,9 +168,10 @@ int main(int argc, char **argv) {
     candidate_free(&c);
     printf("  loop: %zu labels, %zu branches, %zu segments (prologue + body)\n", labels, branches, segments);
 
-    /* The copy in load_store is not folded (its result feeds an add); a
-     * load consumed only by the next store is, and needs no slot. */
-    assert(!avr_mir_value_folded(&m, ls, 0));
+    /* The copy in load_store is not folded (its result feeds an add), so it
+     * has a slot; a load consumed only by the next store is folded and has
+     * none (below). */
+    assert(layout.value_slot[ls][0] != 0);
     avr_mir_layout_free(&layout);
     mir_module_free(&m);
 
@@ -185,7 +186,6 @@ int main(int argc, char **argv) {
         mir_emit_store(&m, f, e, MIR_TYPE_I8, mir_at_object(g, 0), mir_imm(0x5A), 8);
         mir_ret(&m, f, e, mir_none());
         assert(mir_verify(&m, msg, sizeof(msg)) == 0);
-        assert(avr_mir_value_folded(&m, f, v));
         assert(avr_mir_layout_init(&m, &layout) == 0);
         layout.object_addr[g] = 0x0300; /* a caller-fixed address is kept */
         assert(avr_mir_layout_place_rest(&m, &layout, AVR_MIR_SRAM_BASE, AVR_MIR_SRAM_LIMIT, &end) == 0);
@@ -232,6 +232,42 @@ int main(int argc, char **argv) {
     }
     mir_module_free(&m);
     printf("  refused: 32-bit multiply, address of a program-memory constant\n");
+
+    /* Invalid MIR cannot reach selection by skipping mir_verify: every
+     * backend entry point verifies for itself, and selection refuses a
+     * layout that no longer matches its module. */
+    mir_module_init(&m);
+    {
+        uint32_t f = mirp_load_store(&m);
+        m.functions[f].blocks[0].insts[3].dst = 1000000; /* a stray destination on a store */
+        assert(avr_mir_layout_init(&m, &layout) != 0);
+        Candidate data;
+        assert(avr_mir_select_constants(&m, &g_cm, &data) != 0 && data.num_instructions == 0);
+        m.functions[f].blocks[0].insts[3].dst = MIR_NONE;
+        assert(avr_mir_layout_init(&m, &layout) == 0);
+        assert(avr_mir_layout_place_rest(&m, &layout, AVR_MIR_SRAM_BASE, AVR_MIR_SRAM_LIMIT, &end) == 0);
+        AvrMirCode code;
+        /* broken after a valid layout was made */
+        m.functions[f].blocks[0].insts[2].b = mir_value(1000000);
+        assert(avr_mir_select_function(&m, &layout, f, 1, &g_cm, &code) != 0 && code.count == 0);
+        m.functions[f].blocks[0].insts[2].b = mir_value(1);
+        assert(avr_mir_select_function(&m, &layout, f, 1, &g_cm, &code) == 0);
+        avr_mir_code_free(&code);
+        /* a value added after the layout was made has no slot */
+        mir_new_value(&m, f, MIR_TYPE_I16);
+        assert(avr_mir_select_function(&m, &layout, f, 1, &g_cm, &code) != 0 && code.count == 0);
+        assert(avr_mir_select_function(&m, &layout, 99, 1, &g_cm, &code) != 0);
+        avr_mir_layout_free(&layout);
+        /* a layout whose objects were never placed */
+        mir_module_free(&m);
+        mir_module_init(&m);
+        f = mirp_load_store(&m);
+        assert(avr_mir_layout_init(&m, &layout) == 0);
+        assert(avr_mir_select_function(&m, &layout, f, 1, &g_cm, &code) != 0 && code.count == 0);
+        avr_mir_layout_free(&layout);
+    }
+    mir_module_free(&m);
+    printf("  refused: invalid MIR at layout, selection and constants; a stale or unplaced layout\n");
 
     /* Layout refuses what does not fit. */
     mir_module_init(&m);
