@@ -114,3 +114,70 @@ uint32_t mirp_loop(MirModule *m) {
     mir_ret(m, f, exit, V(s));
     return f;
 }
+
+uint32_t mirp_imperative_values(MirModule *m) {
+    uint32_t f = mir_add_function(m, "imperative_values", I16);
+    uint32_t x = mir_add_param(m, f, I16);
+    uint32_t y = mir_new_value(m, f, I16), c = mir_new_value(m, f, I8);
+    uint32_t sum = mir_new_value(m, f, I16), i = mir_new_value(m, f, I16);
+    uint32_t b[7];
+    for (int k = 0; k < 7; k++) b[k] = mir_add_block(m, f);
+    mir_emit_binary(m, f, b[0], MIR_ADD, y, I16, V(x), K(3), 0);
+    mir_emit_cmp(m, f, b[0], MIR_CMP_SLT, c, I16, K(10), V(y), 0); /* y > 10 is 10 <s y */
+    mir_cbr(m, f, b[0], V(c), b[1], b[2]);
+    mir_emit_binary(m, f, b[1], MIR_SUB, y, I16, V(y), K(2), 0);
+    mir_br(m, f, b[1], b[3]);
+    mir_emit_binary(m, f, b[2], MIR_ADD, y, I16, V(y), K(4), 0);
+    mir_br(m, f, b[2], b[3]); /* merge */
+    mir_emit_const(m, f, b[3], sum, I16, 0, 0);
+    mir_emit_const(m, f, b[3], i, I16, 0, 0);
+    mir_br(m, f, b[3], b[4]);
+    mir_emit_cmp(m, f, b[4], MIR_CMP_SLT, c, I16, V(i), K(5), 0);
+    mir_cbr(m, f, b[4], V(c), b[5], b[6]);
+    mir_emit_binary(m, f, b[5], MIR_ADD, sum, I16, V(sum), V(y), 0);
+    mir_emit_binary(m, f, b[5], MIR_ADD, i, I16, V(i), K(1), 0);
+    mir_br(m, f, b[5], b[4]); /* back edge */
+    mir_ret(m, f, b[6], V(sum));
+    return f;
+}
+
+uint32_t mirp_imperative_memory(MirModule *m) {
+    uint32_t f = mir_add_function(m, "imperative_memory", I16);
+    uint32_t x = mir_add_param(m, f, I16);
+    uint32_t oy = mir_add_object(m, MIR_MEM_STACK, 2, "imperative_memory.y", f);
+    uint32_t os = mir_add_object(m, MIR_MEM_STACK, 2, "imperative_memory.sum", f);
+    uint32_t oi = mir_add_object(m, MIR_MEM_STACK, 2, "imperative_memory.i", f);
+    uint32_t t = mir_new_value(m, f, I16), u = mir_new_value(m, f, I16), c = mir_new_value(m, f, I8);
+    uint32_t b[7];
+    for (int k = 0; k < 7; k++) b[k] = mir_add_block(m, f);
+    mir_emit_binary(m, f, b[0], MIR_ADD, t, I16, V(x), K(3), 0);
+    mir_emit_store(m, f, b[0], I16, mir_at_object(oy, 0), V(t), 0);
+    mir_emit_load(m, f, b[0], t, I16, mir_at_object(oy, 0), 0);
+    mir_emit_cmp(m, f, b[0], MIR_CMP_SLT, c, I16, K(10), V(t), 0);
+    mir_cbr(m, f, b[0], V(c), b[1], b[2]);
+    mir_emit_load(m, f, b[1], t, I16, mir_at_object(oy, 0), 0);
+    mir_emit_binary(m, f, b[1], MIR_SUB, t, I16, V(t), K(2), 0);
+    mir_emit_store(m, f, b[1], I16, mir_at_object(oy, 0), V(t), 0);
+    mir_br(m, f, b[1], b[3]);
+    mir_emit_load(m, f, b[2], t, I16, mir_at_object(oy, 0), 0);
+    mir_emit_binary(m, f, b[2], MIR_ADD, t, I16, V(t), K(4), 0);
+    mir_emit_store(m, f, b[2], I16, mir_at_object(oy, 0), V(t), 0);
+    mir_br(m, f, b[2], b[3]);
+    mir_emit_store(m, f, b[3], I16, mir_at_object(os, 0), K(0), 0);
+    mir_emit_store(m, f, b[3], I16, mir_at_object(oi, 0), K(0), 0);
+    mir_br(m, f, b[3], b[4]);
+    mir_emit_load(m, f, b[4], t, I16, mir_at_object(oi, 0), 0);
+    mir_emit_cmp(m, f, b[4], MIR_CMP_SLT, c, I16, V(t), K(5), 0);
+    mir_cbr(m, f, b[4], V(c), b[5], b[6]);
+    mir_emit_load(m, f, b[5], t, I16, mir_at_object(os, 0), 0);
+    mir_emit_load(m, f, b[5], u, I16, mir_at_object(oy, 0), 0);
+    mir_emit_binary(m, f, b[5], MIR_ADD, t, I16, V(t), V(u), 0);
+    mir_emit_store(m, f, b[5], I16, mir_at_object(os, 0), V(t), 0);
+    mir_emit_load(m, f, b[5], t, I16, mir_at_object(oi, 0), 0);
+    mir_emit_binary(m, f, b[5], MIR_ADD, t, I16, V(t), K(1), 0);
+    mir_emit_store(m, f, b[5], I16, mir_at_object(oi, 0), V(t), 0);
+    mir_br(m, f, b[5], b[4]);
+    mir_emit_load(m, f, b[6], t, I16, mir_at_object(os, 0), 0);
+    mir_ret(m, f, b[6], V(t));
+    return f;
+}

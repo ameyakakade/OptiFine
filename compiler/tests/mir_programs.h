@@ -21,4 +21,19 @@ uint32_t mirp_compares(MirModule *m);
  * through a pointer; returns 135 */
 uint32_t mirp_loop(MirModule *m);
 
+/* The imperative reference function, as a C frontend would hand it over:
+ *
+ *   int16 f(int16 x) { int16 y = x + 3; if (y > 10) y = y - 2; else y = y + 4;
+ *                      int16 sum = 0; for (int16 i = 0; i < 5; ++i) sum += y;
+ *                      return sum; }
+ *
+ * in seven blocks (entry / then / else / loop init / loop head / loop body /
+ * exit), with MIR's wrapping 16-bit arithmetic. Two encodings:
+ *   mirp_imperative_values  every local a (non-SSA) virtual value
+ *   mirp_imperative_memory  every local a MIR_MEM_STACK object, read and
+ *                           written by LOAD and STORE, as an unoptimizing
+ *                           frontend emits it */
+uint32_t mirp_imperative_values(MirModule *m);
+uint32_t mirp_imperative_memory(MirModule *m);
+
 #endif /* OPTIFINE_TEST_MIR_PROGRAMS_H */

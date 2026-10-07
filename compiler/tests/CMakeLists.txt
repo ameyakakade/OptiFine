@@ -35,6 +35,7 @@ optifine_add_test(test_ir)
 optifine_add_test(test_mir BACKEND_ONLY)
 optifine_add_test(test_avr_mir BACKEND_ONLY ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
 optifine_add_test(test_avr_mir_branches BACKEND_ONLY ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
+optifine_add_test(test_mir_standalone BACKEND_ONLY ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
 optifine_add_test(test_emit_unit BACKEND_ONLY ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
 optifine_add_test(test_backend_link BACKEND_ONLY ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
 optifine_add_test(test_hir_to_mir ARGS
