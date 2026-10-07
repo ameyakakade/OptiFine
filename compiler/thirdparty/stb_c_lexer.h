@@ -169,6 +169,7 @@ extern void stb_c_lexer_get_location(const stb_lexer *lexer, const char *where, 
 //    - loc->line_number is the line number in the file, counting from 1, of the location
 //    - loc->line_offset is the char-offset in the line, counting from 0, of the location
 
+void stb_c_lexer_print_token(stb_lexer *lexer);
 
 #ifdef __cplusplus
 }
@@ -798,42 +799,36 @@ int stb_c_lexer_get_token(stb_lexer *lexer)
          goto single_char;
    }
 }
-#endif // STB_C_LEXER_IMPLEMENTATION
 
-#ifdef STB_C_LEXER_SELF_TEST
-#define _CRT_SECURE_NO_WARNINGS
-#include <stdio.h>
-#include <stdlib.h>
-
-static void print_token(stb_lexer *lexer)
+void stb_c_lexer_print_token(stb_lexer *lexer)
 {
    switch (lexer->token) {
-      case CLEX_id        : printf("_%s", lexer->string); break;
-      case CLEX_eq        : printf("=="); break;
-      case CLEX_noteq     : printf("!="); break;
-      case CLEX_lesseq    : printf("<="); break;
-      case CLEX_greatereq : printf(">="); break;
-      case CLEX_andand    : printf("&&"); break;
-      case CLEX_oror      : printf("||"); break;
-      case CLEX_shl       : printf("<<"); break;
-      case CLEX_shr       : printf(">>"); break;
-      case CLEX_plusplus  : printf("++"); break;
-      case CLEX_minusminus: printf("--"); break;
-      case CLEX_arrow     : printf("->"); break;
-      case CLEX_andeq     : printf("&="); break;
-      case CLEX_oreq      : printf("|="); break;
-      case CLEX_xoreq     : printf("^="); break;
-      case CLEX_pluseq    : printf("+="); break;
-      case CLEX_minuseq   : printf("-="); break;
-      case CLEX_muleq     : printf("*="); break;
-      case CLEX_diveq     : printf("/="); break;
-      case CLEX_modeq     : printf("%%="); break;
-      case CLEX_shleq     : printf("<<="); break;
-      case CLEX_shreq     : printf(">>="); break;
-      case CLEX_eqarrow   : printf("=>"); break;
-      case CLEX_dqstring  : printf("\"%s\"", lexer->string); break;
-      case CLEX_sqstring  : printf("'\"%s\"'", lexer->string); break;
-      case CLEX_charlit   : printf("'%s'", lexer->string); break;
+   case CLEX_id        : printf("id: "); printf("_%s", lexer->string); break;
+   case CLEX_eq        : printf("eq: "); printf("=="); break;
+   case CLEX_noteq     : printf("noteq: "); printf("!="); break;
+   case CLEX_lesseq    : printf("lesseq: "); printf("<="); break;
+   case CLEX_greatereq : printf("greatereq: "); printf(">="); break;
+   case CLEX_andand    : printf("andand: "); printf("&&"); break;
+   case CLEX_oror      : printf("oror: "); printf("||"); break;
+   case CLEX_shl       : printf("shl: "); printf("<<"); break;
+   case CLEX_shr       : printf("shr: "); printf(">>"); break;
+   case CLEX_plusplus  : printf("plusplus: "); printf("++"); break;
+   case CLEX_minusminus: printf("minusminus: "); printf("--"); break;
+   case CLEX_arrow     : printf("arrow: "); printf("->"); break;
+   case CLEX_andeq     : printf("andeq: "); printf("&="); break;
+   case CLEX_oreq      : printf("oreq: "); printf("|="); break;
+   case CLEX_xoreq     : printf("xoreq: "); printf("^="); break;
+   case CLEX_pluseq    : printf("pluseq: "); printf("+="); break;
+   case CLEX_minuseq   : printf("minuseq: "); printf("-="); break;
+   case CLEX_muleq     : printf("muleq: "); printf("*="); break;
+   case CLEX_diveq     : printf("diveq: "); printf("/="); break;
+   case CLEX_modeq     : printf("modeq: "); printf("%%="); break;
+   case CLEX_shleq     : printf("shleq: "); printf("<<="); break;
+   case CLEX_shreq     : printf("shreq: "); printf(">>="); break;
+   case CLEX_eqarrow   : printf("eqarrow: "); printf("=>"); break;
+   case CLEX_dqstring  : printf("dqstring: "); printf("\"%s\"", lexer->string); break;
+   case CLEX_sqstring  : printf("sqstring: "); printf("'\"%s\"'", lexer->string); break;
+   case CLEX_charlit   : printf("charlit: "); printf("'%s'", lexer->string); break;
       #if defined(STB__clex_int_as_double) && !defined(STB__CLEX_use_stdlib)
       case CLEX_intlit    : printf("#%g", lexer->real_number); break;
       #else
@@ -849,6 +844,14 @@ static void print_token(stb_lexer *lexer)
          break;
    }
 }
+
+#endif // STB_C_LEXER_IMPLEMENTATION
+
+#ifdef STB_C_LEXER_SELF_TEST
+#define _CRT_SECURE_NO_WARNINGS
+#include <stdio.h>
+#include <stdlib.h>
+
 
 /* Force a test
 of parsing
