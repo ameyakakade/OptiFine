@@ -484,6 +484,7 @@ static void emit_fixture(Fx *f, const char *path) {
     assert(emit_candidate(&unit, &harness, out) == 0);
     fprintf(out, "\n    ; ---- FFT stages 0-5 ----\n");
     assert(emit_candidate(&unit, &fft, out) == 0);
+    emit_unit_free(&unit);
     fclose(out);
 
     /* Same run in the interpreter, so the fixture's own cycles are checked. */

@@ -106,6 +106,7 @@ static void assert_reusable_classifier_regions(const IrGraph *graph, const SramL
     assert(codegen_emit_inference_body(graph, layout, reuse, cost_model,
                                        demo_input, demo_input_len, 1,
                                        &unit, body_out, &body) == 0);
+    emit_unit_free(&unit);
     assert(init.energy_nj > 0.0 && body.energy_nj > 0.0);
     assert(init.cycles > 0 && body.cycles > 0);
 

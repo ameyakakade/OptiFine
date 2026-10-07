@@ -89,11 +89,11 @@ static int periodic_output_addr(const IrGraph *graph, const SramLayout *layout,
     return 0;
 }
 
-int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout,
-                                  const ReuseAnalysis *reuse, const CostModel *cost_model,
-                                  const int8_t *demo_input, size_t demo_input_len,
-                                  const PeriodicOptions *options,
-                                  FILE *out, PeriodicProgramCost *out_cost) {
+static int emit_periodic(const IrGraph *graph, const SramLayout *layout,
+                         const ReuseAnalysis *reuse, const CostModel *cost_model,
+                         const int8_t *demo_input, size_t demo_input_len,
+                         const PeriodicOptions *options,
+                         FILE *out, PeriodicProgramCost *out_cost, EmitUnit *unit) {
     if (out_cost == NULL) {
         return -1;
     }
@@ -160,13 +160,10 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
         return -1;
     }
 
-    /* One .s file, so one label namespace across both emitted regions. */
-    EmitUnit unit;
-    emit_unit_init(&unit);
     if (codegen_emit_initialization(graph, layout, reuse, cost_model,
                                     demo_input, demo_input_len,
                                     options->use_real_candidates,
-                                    &unit, out, &out_cost->initialization) != 0) {
+                                    unit, out, &out_cost->initialization) != 0) {
         return -1;
     }
 
@@ -230,7 +227,7 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
     if (codegen_emit_inference_body(graph, layout, reuse, cost_model,
                                     demo_input, demo_input_len,
                                     options->use_real_candidates,
-                                    &unit, out, &out_cost->inference) != 0) {
+                                    unit, out, &out_cost->inference) != 0) {
         return -1;
     }
 
@@ -314,9 +311,23 @@ int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout
 
     /* Program-memory constants (the DSP twiddle table) go after the ISR's
      * reti: no path falls through to them. Nothing is written for ML. */
-    if (codegen_emit_constant_data(graph, cost_model, &unit, out) != 0) {
+    if (codegen_emit_constant_data(graph, cost_model, unit, out) != 0) {
         return -1;
     }
 
     return 0;
+}
+
+int codegen_emit_periodic_program(const IrGraph *graph, const SramLayout *layout,
+                                  const ReuseAnalysis *reuse, const CostModel *cost_model,
+                                  const int8_t *demo_input, size_t demo_input_len,
+                                  const PeriodicOptions *options,
+                                  FILE *out, PeriodicProgramCost *out_cost) {
+    /* One .s file, so one label namespace across both emitted regions. */
+    EmitUnit unit;
+    emit_unit_init(&unit);
+    int rc = emit_periodic(graph, layout, reuse, cost_model, demo_input, demo_input_len, options, out, out_cost,
+                           &unit);
+    emit_unit_free(&unit);
+    return rc;
 }

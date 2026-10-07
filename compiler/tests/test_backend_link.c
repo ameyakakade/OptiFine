@@ -59,6 +59,7 @@ int main(int argc, char **argv) {
     assert(emit_program_prologue(out) == 0);
     for (size_t i = 0; i < code.count; i++) assert(emit_candidate(&unit, &code.segments[i].code, out) == 0);
     assert(emit_program_epilogue(out) == 0);
+    emit_unit_free(&unit);
     rewind(out);
     char text[8192];
     size_t n = fread(text, 1, sizeof(text) - 1, out);

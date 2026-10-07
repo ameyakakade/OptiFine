@@ -1,5 +1,7 @@
 #include "optifine/emit.h"
 
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "optifine/codegen/instr_buf.h"
@@ -22,10 +24,51 @@ static const char *unit_operand(const EmitUnit *unit, const char *op, char *scra
     return avr_local_label_rebase(op, unit->next_local, scratch) ? scratch : op;
 }
 
+void emit_unit_free(EmitUnit *unit) {
+    free(unit->globals);
+    emit_unit_init(unit);
+}
+
+static int is_defined(const EmitUnit *unit, const char *name) {
+    for (size_t g = 0; g < unit->num_globals; g++) {
+        if (strcmp(unit->globals[g], name) == 0) return 1;
+    }
+    return 0;
+}
+
+int emit_unit_define(EmitUnit *unit, const char *name) {
+    if (is_defined(unit, name)) {
+        fprintf(stderr, "emit: label '%s' is already defined in this assembly unit\n", name);
+        return -1;
+    }
+    if (strlen(name) >= AVR_OPERAND_LEN) {
+        fprintf(stderr, "emit: label '%s' is too long\n", name);
+        return -1;
+    }
+    if (unit->num_globals == unit->globals_capacity) {
+        size_t cap = unit->globals_capacity ? unit->globals_capacity * 2 : 64;
+        if (cap > SIZE_MAX / sizeof(*unit->globals)) {
+            fprintf(stderr, "emit: too many labels in one assembly unit\n");
+            return -1;
+        }
+        char(*grown)[AVR_OPERAND_LEN] = realloc(unit->globals, cap * sizeof(*unit->globals));
+        if (!grown) {
+            fprintf(stderr, "emit: out of memory recording labels\n");
+            return -1;
+        }
+        unit->globals = grown;
+        unit->globals_capacity = cap;
+    }
+    snprintf(unit->globals[unit->num_globals++], AVR_OPERAND_LEN, "%s", name);
+    return 0;
+}
+
 int emit_candidate(EmitUnit *unit, const Candidate *candidate, FILE *out) {
     /* Numbers this candidate's local labels consume, and a duplicate check on
-     * its global ones, both before any text is written. */
+     * its global ones (including two definitions within this candidate),
+     * both before any text is written. */
     unsigned span = 0;
+    size_t first_new = unit->num_globals;
     for (size_t i = 0; i < candidate->num_instructions; i++) {
         const AvrInstr *instr = &candidate->instructions[i];
         if (!avr_instr_is_label(instr)) continue;
@@ -34,19 +77,10 @@ int emit_candidate(EmitUnit *unit, const Candidate *candidate, FILE *out) {
             if (idx + 1 > span) span = idx + 1;
             continue;
         }
-        for (size_t g = 0; g < unit->num_globals; g++) {
-            if (strcmp(unit->globals[g], instr->operands[0]) == 0) {
-                fprintf(stderr, "emit: label '%s' is already defined in this assembly unit\n",
-                        instr->operands[0]);
-                return -1;
-            }
-        }
-        if (unit->num_globals == EMIT_UNIT_MAX_GLOBALS) {
-            fprintf(stderr, "emit: more than %d global labels in one assembly unit\n",
-                    EMIT_UNIT_MAX_GLOBALS);
+        if (emit_unit_define(unit, instr->operands[0]) != 0) {
+            unit->num_globals = first_new; /* nothing of this candidate was written */
             return -1;
         }
-        snprintf(unit->globals[unit->num_globals++], AVR_OPERAND_LEN, "%s", instr->operands[0]);
     }
 
     char scratch[AVR_OPERAND_LEN];

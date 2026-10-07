@@ -253,6 +253,7 @@ static uint32_t emit_fixture(const char *path, const uint32_t *values, size_t n)
     EmitUnit unit; emit_unit_init(&unit);
     emit_program_prologue(out);
     assert(emit_candidate(&unit, &c, out) == 0);
+    emit_unit_free(&unit);
     fclose(out);
     uint32_t cyc = c.cycles;
     candidate_free(&c);

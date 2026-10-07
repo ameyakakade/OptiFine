@@ -76,9 +76,16 @@ static int emit_unit(const Unit *u, FILE *out, int naive) {
     emit_program_prologue(out);
     for (size_t i = 0; i < u->count; i++) {
         fprintf(out, "\n    ; ---- %s ----\n", u->names[i]);
-        if (naive) emit_unit_init(&unit); /* the pre-fix behaviour: a namespace per candidate */
-        if (emit_candidate(&unit, &u->parts[i], out) != 0) return -1;
+        if (naive) { /* the pre-fix behaviour: a namespace per candidate */
+            emit_unit_free(&unit);
+            emit_unit_init(&unit);
+        }
+        if (emit_candidate(&unit, &u->parts[i], out) != 0) {
+            emit_unit_free(&unit);
+            return -1;
+        }
     }
+    emit_unit_free(&unit);
     return 0;
 }
 
@@ -169,6 +176,7 @@ static void test_global_label_defined_once(void) {
     const Candidate *table = &u.parts[u.count - 1];
     assert(emit_candidate(&unit, table, f) == 0);
     assert(emit_candidate(&unit, table, f) != 0); /* second .Ltw refused */
+    emit_unit_free(&unit);
     fclose(f);
     printf("  a second definition of .Ltw in one unit is refused\n");
     free_unit(&u);

@@ -462,6 +462,7 @@ static void emit_fixture(Fx *f, const char *path) {
     fprintf(out, "\n    ; ---- OP_MAGNITUDE ----\n");
     assert(emit_candidate(&unit, &f->mag, out) == 0);
     assert(emit_candidate(&unit, &brk, out) == 0);
+    emit_unit_free(&unit);
     fclose(out);
     printf("fixture %s: harness %u + magnitude %u + break %u = %u cycles predicted "
            "(interpreter %lu + %lu + 1)\n", path, harness.cycles, f->mag.cycles, brk.cycles,

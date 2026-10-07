@@ -451,6 +451,7 @@ static void emit_parts(const char *path, Candidate *parts, const char **names, s
         fprintf(out, "\n    ; ---- %s ----\n", names[i]);
         assert(emit_candidate(&unit, &parts[i], out) == 0);
     }
+    emit_unit_free(&unit);
     fclose(out);
 }
 

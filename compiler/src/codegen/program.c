@@ -103,14 +103,16 @@ int codegen_emit_program(const IrGraph *graph, const SramLayout *layout,
     EmitUnit unit;
     emit_unit_init(&unit);
     emit_program_prologue(out);
-    if (codegen_emit_initialization(graph, layout, reuse, cost_model,
-                                    demo_input, demo_input_len, use_real_candidates,
-                                    &unit, out, &initialization) != 0) {
-        return -1;
+    int rc = codegen_emit_initialization(graph, layout, reuse, cost_model,
+                                         demo_input, demo_input_len, use_real_candidates,
+                                         &unit, out, &initialization);
+    if (rc == 0) {
+        rc = codegen_emit_inference_body(graph, layout, reuse, cost_model,
+                                         demo_input, demo_input_len, use_real_candidates,
+                                         &unit, out, &inference_body);
     }
-    if (codegen_emit_inference_body(graph, layout, reuse, cost_model,
-                                    demo_input, demo_input_len, use_real_candidates,
-                                    &unit, out, &inference_body) != 0) {
+    emit_unit_free(&unit);
+    if (rc != 0) {
         return -1;
     }
 
@@ -149,24 +151,17 @@ int codegen_emit_constant_data(const IrGraph *graph, const CostModel *cost_model
     return rc;
 }
 
-int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
-                             const ReuseAnalysis *reuse, const CostModel *cost_model,
-                             const int8_t *input_bytes, size_t input_len,
-                             FILE *out, DspProgramCost *out_cost) {
-    ProgramRegionCost zero = {0};
-    out_cost->initialization = zero;
-    out_cost->body = zero;
-    out_cost->termination = zero;
-
-    EmitUnit unit;
-    emit_unit_init(&unit);
+/* codegen_emit_dsp_program's body, into one assembly unit. */
+static int emit_dsp_program(const IrGraph *graph, const SramLayout *layout, const ReuseAnalysis *reuse,
+                            const CostModel *cost_model, const int8_t *input_bytes, size_t input_len,
+                            FILE *out, DspProgramCost *out_cost, EmitUnit *unit) {
     emit_program_prologue(out);
     if (codegen_emit_initialization(graph, layout, reuse, cost_model, input_bytes, input_len, 0,
-                                    &unit, out, &out_cost->initialization) != 0) {
+                                    unit, out, &out_cost->initialization) != 0) {
         return -1;
     }
     if (codegen_emit_inference_body(graph, layout, reuse, cost_model, input_bytes, input_len, 0,
-                                    &unit, out, &out_cost->body) != 0) {
+                                    unit, out, &out_cost->body) != 0) {
         return -1;
     }
 
@@ -184,9 +179,25 @@ int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
         return -1;
     }
     fprintf(out, "\n    ; ---- program end: break, then constant data ----\n");
-    int rc = emit_priced(&unit, &brk, out, &out_cost->termination);
-    if (rc == 0) rc = emit_candidate(&unit, &data, out);
+    int rc = emit_priced(unit, &brk, out, &out_cost->termination);
+    if (rc == 0) rc = emit_candidate(unit, &data, out);
     candidate_free(&brk);
     candidate_free(&data);
+    return rc;
+}
+
+int codegen_emit_dsp_program(const IrGraph *graph, const SramLayout *layout,
+                             const ReuseAnalysis *reuse, const CostModel *cost_model,
+                             const int8_t *input_bytes, size_t input_len,
+                             FILE *out, DspProgramCost *out_cost) {
+    ProgramRegionCost zero = {0};
+    out_cost->initialization = zero;
+    out_cost->body = zero;
+    out_cost->termination = zero;
+
+    EmitUnit unit;
+    emit_unit_init(&unit);
+    int rc = emit_dsp_program(graph, layout, reuse, cost_model, input_bytes, input_len, out, out_cost, &unit);
+    emit_unit_free(&unit);
     return rc;
 }

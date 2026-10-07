@@ -343,6 +343,7 @@ static void test_production_program(Fx *f, const int8_t *input) {
     EmitUnit unit; emit_unit_init(&unit);
     emit_program_prologue(re);
     for (size_t i = 0; i < p.n; i++) assert(emit_candidate(&unit, &p.part[i], re) == 0);
+    emit_unit_free(&unit);
     char *mine = read_all(re);
     fclose(re);
     char *a = instruction_lines(text), *b = instruction_lines(mine);
