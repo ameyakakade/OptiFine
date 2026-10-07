@@ -3,7 +3,8 @@
  * if anything in the backend comes to need the workload graph or its
  * lowering, and fails to compile if a backend header comes to include a
  * workload header. It then compiles a small MIR function the way a frontend
- * would: MIR builder, verification, layout, selection, assembly text. */
+ * would: MIR builder, verification, layout, selection, assembly text -- step
+ * by step, and through the program entry point. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -68,6 +69,21 @@ int main(int argc, char **argv) {
     assert(strstr(text, "_start:") && strstr(text, ".Lf0b2:") && strstr(text, "    break"));
     avr_mir_code_free(&code);
     avr_mir_layout_free(&layout);
+
+    /* The same through the program entry point a frontend uses. */
+    AvrMirProgram program;
+    assert(avr_mir_build_program(&m, f, &cm, &program) == 0);
+    assert(program.num_params == 1 && program.param_bytes[0] == 1 && program.return_bytes == 1);
+    assert(!program.cost.exact);
+    out = tmpfile();
+    assert(out);
+    assert(avr_mir_emit_program(&program, out) == 0);
+    rewind(out);
+    n = fread(text, 1, sizeof(text) - 1, out);
+    text[n] = '\0';
+    fclose(out);
+    assert(strstr(text, ".set optifine_param_0,") && strstr(text, ".set optifine_return,") && strstr(text, "    break"));
+    avr_mir_program_free(&program);
     mir_module_free(&m);
     printf("test_backend_link: MIR -> AVR assembly through optifine_backend alone\n");
     return 0;

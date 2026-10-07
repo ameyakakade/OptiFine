@@ -47,6 +47,7 @@ add_library(optifine_backend STATIC
     src/mir/mir_verify.c
     src/codegen/avr_instr.c
     src/codegen/avr_mir.c
+    src/codegen/avr_mir_program.c
     src/codegen/cost_category.c
     src/codegen/instr_buf.c
 )

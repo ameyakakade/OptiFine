@@ -6,6 +6,7 @@
 #include "optifine/codegen/hir_to_mir.h"
 #include "optifine/codegen/instr_buf.h"
 #include "optifine/emit.h"
+#include "optifine/invariant.h"
 
 /* Every program region goes the same way: workload HIR -> MIR (hir_to_mir)
  * -> AVR selection (avr_mir) -> emission. Each region builds only the MIR
@@ -36,6 +37,11 @@ static int select_region(const IrGraph *graph, const SramLayout *layout, const R
          * the backend's entry prologue (clr r2). */
         rc = avr_mir_select_function(&mir.module, &avr, fn, which == HIR_TO_MIR_INITIALIZE, cost_model, code);
         avr_mir_layout_free(&avr);
+        /* The region costs printed and compared against Avrora are execution
+         * costs only because every workload function is one block: its
+         * control flow lives inside counted-loop target regions, which
+         * instrbuf_price prices by trip count. */
+        if (rc == 0) OPTIFINE_INVARIANT(code->straight_line);
     }
     workload_mir_free(&mir);
     return rc;

@@ -1,7 +1,10 @@
 /* AVR backend for the generic MIR (optifine/mir.h).
  *
- * Three steps, all target-specific and all independent of where the MIR came
- * from (the workload translation in hir_to_mir.h today, a C frontend later):
+ * A frontend that builds MIR uses avr_mir_build_program and
+ * avr_mir_emit_program (bottom of this file): one call verifies, lays out,
+ * selects and prices, the other writes the assembly. Underneath are three
+ * steps, all target-specific and all independent of where the MIR came from
+ * (the workload translation in hir_to_mir.h, or a frontend):
  *
  *   1. Address assignment (AvrMirLayout). MIR objects have no addresses; the
  *      backend gives every SRAM object (GLOBAL, STACK, SCRATCH, TENSOR) an
@@ -20,13 +23,17 @@
  *      in a register across instructions; a real register allocator belongs
  *      here, below MIR, and does not exist yet.
  *
- *      Control flow: blocks get labels .Lf<fn>b<blk>; br is rjmp (omitted for
- *      a fall-through), cbr is a compare against r2 and breq over two rjmps,
- *      so no conditional branch has to reach further than one word. An entry
- *      function is inlined by the program wrapper, so its `ret` falls through
- *      to the end of the function (after storing any return value in the
- *      function's return slot). There is no call instruction or calling
- *      convention yet.
+ *      Control flow: blocks get labels .Lf<fn>b<blk>; br is a jump (omitted
+ *      for a fall-through), cbr is a compare against r2 and a breq that hops
+ *      over the taken edge's jump, so no conditional branch needs more reach
+ *      than that one jump. Each jump is an rjmp (+/-2K words) unless the
+ *      function's layout in flash words shows it cannot reach, when it is a
+ *      jmp (two words, 3 cycles); selection repeats until every jump reaches,
+ *      so the assembler never sees an out-of-range branch. An entry function
+ *      is inlined by the program wrapper, so its `ret` falls through to the
+ *      end of the function (after storing any return value in the function's
+ *      return slot). There is no call instruction or calling convention yet;
+ *      see the entry convention below.
  *
  *      MIR_TARGET regions whose target is "avr" carry a priced Candidate,
  *      which is emitted as is.
@@ -40,15 +47,21 @@
  *   3. Constant data (avr_mir_select_constants): every CONST object as a
  *      label and .dw words, to be placed where control flow cannot reach it.
  *
- * Costs: each segment's Candidate is priced by instrbuf_price. For straight-
- * line code that is the executed cost; for a function with branches it is the
- * cost of executing every emitted instruction once, which a caller must not
- * present as a path cost. */
+ * Costs: each segment's Candidate is priced by instrbuf_price: cycles from the
+ * AVR timing table, energy from the cost model. For a single-block function
+ * (AvrMirCode.straight_line) that is the executed cost -- the workload
+ * programs are all single-block, so their printed cycles are exact. For a
+ * function with branches it is a STATIC figure, every emitted instruction
+ * priced once whatever path runs, and must never be reported as predicted
+ * execution cycles or energy: path-sensitive costing is future work, and
+ * nothing here selects between alternative codings of generic MIR by energy
+ * (that happens only for workload kernels, above MIR). */
 #ifndef OPTIFINE_CODEGEN_AVR_MIR_H
 #define OPTIFINE_CODEGEN_AVR_MIR_H
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "optifine/codegen/avr_instr.h"
 #include "optifine/cost_model.h"
@@ -124,5 +137,66 @@ int avr_mir_select_function(const MirModule *module, const AvrMirLayout *layout,
  * data words (zero cycles). An odd-sized object is padded with a zero byte.
  * Empty when the module has none. */
 int avr_mir_select_constants(const MirModule *module, const CostModel *cost_model, Candidate *out);
+
+/* ---- Standalone programs and the research entry convention ----
+ *
+ * The supported way for a frontend to compile MIR: one entry function, no
+ * calls, run once from reset to a halt. It is a research convention for
+ * single-function programs pending real call support, NOT an AVR C ABI:
+ *
+ *   entry        `_start` runs `clr r2`, then the entry function inlined; no
+ *                other function of the module is compiled.
+ *   parameters   parameter i lives in SRAM at the absolute address of the
+ *                symbol `optifine_param_<i>` (also in AvrMirProgram), in
+ *                the parameter's width, little-endian. Whoever runs the
+ *                program -- a simulator, a debugger, a test -- writes it
+ *                before execution; nothing initializes it, and SRAM is not
+ *                cleared at reset.
+ *   return       a non-void entry function leaves its value at the symbol
+ *                `optifine_return`, in the return type's width, little-endian.
+ *   termination  `break` (priced: Avrora counts it), after which the program
+ *                does nothing; CONST data follows, never executed.
+ *   symbols      `.set` absolute data-space addresses (0x0200..0x10FF), so a
+ *                debugger addresses them in the data space (0x800000 + addr
+ *                for avr-gdb). A CONST object may not use these names.
+ *
+ * Not supported: calls, recursion, reentrancy, a stack frame (STACK objects
+ * are statically placed), initialized or zeroed globals at reset, more than
+ * one entry, linking several units. */
+typedef struct {
+    size_t instructions;    /* AVR instructions executed-or-not, break included; no labels or data */
+    size_t code_bytes;      /* flash for code, break included */
+    size_t data_bytes;      /* flash for CONST data */
+    uint64_t static_cycles; /* every emitted instruction priced once (break included) */
+    double static_energy_nj;
+    /* The entry function is one basic block, so it executes each emitted
+     * instruction exactly once and static_cycles / static_energy_nj ARE its
+     * predicted execution cost. When 0 they are only static figures. */
+    int exact;
+} AvrMirStaticCost;
+
+typedef struct {
+    AvrMirLayout layout;
+    AvrMirCode code;        /* the entry prologue and the entry function */
+    Candidate termination;  /* `break` */
+    Candidate constants;    /* CONST objects */
+    uint32_t entry;
+    size_t num_params;
+    uint16_t *param_addr;   /* per parameter: its SRAM address */
+    size_t *param_bytes;    /* per parameter: its width */
+    uint16_t return_addr;   /* 0 for a void entry function */
+    size_t return_bytes;
+    AvrMirStaticCost cost;
+} AvrMirProgram;
+
+/* Verifies `module` and compiles function `entry` as a standalone program,
+ * placing every SRAM object and value from AVR_MIR_SRAM_BASE. Returns 0, or
+ * -1 with a diagnostic (and `out` empty). */
+int avr_mir_build_program(const MirModule *module, uint32_t entry, const CostModel *cost_model,
+                          AvrMirProgram *out);
+/* Writes the program as one assembly unit: header, entry-convention
+ * symbols, code, break, constant data. Returns 0, or -1 with a diagnostic. */
+int avr_mir_emit_program(const AvrMirProgram *program, FILE *out);
+void avr_mir_program_free(AvrMirProgram *program);
 
 #endif /* OPTIFINE_CODEGEN_AVR_MIR_H */
