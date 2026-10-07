@@ -26,7 +26,11 @@ fetches the last two on Linux).
 - **Respect the layers** (`docs/ARCHITECTURE.md`): a frontend produces either
   a workload graph that passes `ir_verify` or MIR that passes `mir_verify`;
   imperative code goes to MIR, never into the workload graph; nothing below
-  MIR depends on a frontend.
+  MIR depends on a frontend. The generic backend (`optifine_backend`) must
+  not depend on the workload graph or its lowering; `test_backend_link`
+  fails to compile or link if it does. A frontend compiles MIR through
+  `avr_mir_build_program`, which verifies it; MIR builders set every field an
+  opcode does not use to its empty form (`mir.h`).
 - **Correctness first.** A cheaper instruction sequence that computes a
   different result is a failed change. Pair new compiler behaviour with a test
   under `compiler/tests/` that checks results exactly, and keep the compiler's

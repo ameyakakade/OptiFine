@@ -15,13 +15,25 @@ fixed DSP pipeline --(dsp_build.c)/    (IrGraph)                     |  kernels 
 .s --> avr-gcc --> ELF --> Avrora 1.7.115 (-monitors=energy, ATmega128)
 
 Planned, not implemented:
-EDG IL --> EDG-to-MIR adapter --> MIR --> mir_verify --> AVR backend
+EDG IL --> EDG-to-MIR adapter --> MIR --> AVR backend (avr_mir_build_program: verifies, lays out, selects) --> .s
 ```
 
 The compiler is ISO C11 with extensions off (`CMAKE_C_EXTENSIONS OFF`, so
 `-std=c11`), built with `-Wall -Wextra -Wpedantic`, under `compiler/` with no
-dependencies beyond libc and libm. Everything except the command-line driver
-(`src/main.c`) is the `optifine_core` library, which the tests link as well.
+dependencies beyond libc and libm. It builds as two libraries, which the
+tests link as well:
+
+- **`optifine_backend`**: MIR and `mir_verify`, AVR selection from MIR, the
+  AVR instruction and pricing layer, the cost model and assembly emission. It
+  knows nothing of the workload graph: no backend header includes `ir.h` or
+  any workload header, and no backend object needs a workload symbol.
+  `test_backend_link`, `test_mir`, `test_avr_mir`, `test_avr_mir_branches`,
+  `test_mir_standalone` and `test_emit_unit` link it alone, so a dependency
+  creeping back in fails the build.
+- **`optifine_core`**: the frontends, the workload graph and its lowering,
+  `hir_to_mir` and the program wrappers, on top of the backend.
+
+The command-line driver (`src/main.c`) links `optifine_core`.
 
 ## 1. Frontends
 
@@ -66,8 +78,24 @@ must not be forced into it (see "Planned adapter boundary").
   opcode, immediates that fit, memory-object ids, in-bounds object accesses,
   no stores to constants, stack objects used only by their owner, and that
   every use of a value is preceded by an assignment on every path from the
-  entry. `hir_to_mir` verifies every module it builds; `test_mir` rejects 20
-  malformed variants.
+  entry. Every instruction and terminator must be in canonical form: `mir.h`
+  tables which fields each opcode and terminator kind uses, and every other
+  field must be empty, so a stray id in an unused field is rejected rather
+  than read. The definedness dataflow reads only the fields an opcode uses
+  and bounds-checks every id it indexes with, so malformed input gets a
+  diagnostic, never an out-of-bounds access. `test_mir` rejects 45 malformed
+  variants, including the four that once made the verifier itself read or
+  write out of bounds.
+- **The backend verifies for itself.** Every `avr_mir` entry point that takes
+  a module -- layout, selection, constants, `avr_mir_build_program` -- runs
+  `mir_verify` first and refuses invalid MIR, so skipping the caller's own
+  verification cannot get malformed MIR selected. Nothing records "already
+  verified": a module changed between calls is verified again (verification
+  is linear, and a workload program verifies its small modules a few times).
+  Selection also refuses a layout made for a different or since-changed
+  module, or one that left an object or value without an address.
+  `hir_to_mir` additionally verifies every module it builds, to report
+  translation errors where they arise.
 
 Malformed input is reported with a diagnostic and a nonzero exit. Conditions
 only a compiler bug can produce are internal invariants (`invariant.h`,
@@ -152,10 +180,12 @@ absent: there is no MatMul or FFT opcode.
 
 ## 7. AVR machine representation and backend
 
-`AvrInstr` / `InstrBuf` (`codegen/instr_buf.h`) is the AVR machine
+`AvrInstr` and `Candidate` (`codegen/avr_instr.h`, a priced machine
+sequence) and `InstrBuf` (`codegen/instr_buf.h`) are the AVR machine
 representation: opcodes with symbolic operands, labels, program-memory data
 words, and counted-loop regions (`LoopRegion`) that exist for exact pricing.
-A `Candidate` is a priced machine sequence. There is no other AVR layer.
+There is no other AVR layer. The workload candidate machinery
+(`candidates.h`) uses these types; it does not own them.
 
 The MIR backend (`codegen/avr_mir.c`) takes any verified module:
 
@@ -165,13 +195,43 @@ The MIR backend (`codegen/avr_mir.c`) takes any verified module:
 - **selection** turns each instruction into AVR code with fixed scratch
   registers: unfolded values live in SRAM slots, and a load consumed only by
   the next store is folded into an `lds`/`sts` pair. Blocks get labels
-  `.Lf<fn>b<blk>`; `cbr` is a compare against r2 and a one-word `breq` hop
-  over `rjmp`s, so no conditional branch needs long reach; `ret` of an entry
-  function falls through (there is no call or calling convention yet). A
-  `MIR_TARGET` region for "avr" is emitted as its Candidate. Code is grouped
-  into segments by the HIR op it came from, which keeps per-op cost
+  `.Lf<fn>b<blk>`; `cbr` is a compare against r2 and a `breq` that hops over
+  the taken edge's jump, so no conditional branch needs long reach; `ret` of
+  an entry function falls through (there is no call or calling convention
+  yet). A `MIR_TARGET` region for "avr" is emitted as its Candidate. Code is
+  grouped into segments by the HIR op it came from, which keeps per-op cost
   accounting;
+- **branch reach**: each block jump is an `rjmp` (+/-2K words) unless the
+  function's layout in flash words -- `lds`, `sts` and `jmp` are two words,
+  labels none -- shows it cannot reach, in which case it becomes a `jmp`
+  (two words, 3 cycles). Selection repeats until no jump changes, so jumps
+  that push each other out of reach are handled, and the assembler never sees
+  an out-of-range branch. `test_avr_mir_branches` checks short and long
+  forward, backward and conditional branches, and interacting ones, against
+  an independent reach check and by execution; the workloads never emit a
+  `jmp`;
 - **constants** are emitted as labels and `.dw` words after the code.
+
+Labels a function's code defines (`.Lf<fn>b<k>`, hops, the exit) span several
+segments, so the assembly unit (`EmitUnit`, `emit.h`) records them by name to
+refuse a second definition; the record grows with the program (it was a fixed
+256 entries, which a 201-block function exhausted). Candidate-local loop
+labels (`.Ldsp<n>`, `.Lex<n>`) are renumbered per candidate instead.
+`test_emit_unit` covers both.
+
+**Standalone programs and the entry convention.** A frontend compiles MIR
+with `avr_mir_build_program` (verify, lay out from 0x0200, select one entry
+function with the `clr r2` prologue, price, collect constants) and
+`avr_mir_emit_program`. The program follows a research entry convention for
+single-function programs, pending real call support -- it is not an AVR C
+ABI: `_start` runs the entry function inlined and halts on `break`;
+parameter i lives at the absolute SRAM address of symbol `optifine_param_<i>`
+and the return value at `optifine_return`, little-endian in their MIR widths;
+whoever runs the program writes the parameters first (SRAM is not cleared).
+There are no calls, no recursion, no stack frame (stack objects are placed
+statically) and no initialized or zeroed globals at reset. `avr_mir.h` has
+the exact contract; `test_mir_standalone` drives a C-shaped function through
+it.
 
 Not supported yet, and refused with a diagnostic: multiplication wider than
 16 bits, and the address of a program-memory constant (a pointer into flash
@@ -179,7 +239,19 @@ needs an address-space-qualified pointer type). `test_avr_mir` runs every
 generic test program -- arithmetic, 8- and 16-bit multiply, compares, a
 diamond, loads and stores including program memory, a pointer-walking counted
 loop -- on the AVR test interpreter and compares it with the reference MIR
-interpreter (`tests/mir_interp.c`).
+interpreter (`tests/mir_interp.c`). `test_mir_standalone` compiles
+
+```c
+int f(int x) { int y = x + 3; if (y > 10) y = y - 2; else y = y + 4;
+               int sum = 0; for (int i = 0; i < 5; ++i) sum += y; return sum; }
+```
+
+(with 16-bit `int`), built directly with the MIR API in seven blocks -- once
+with locals as values, once as stack objects -- through
+`avr_mir_build_program`, and checks it on both arms and through the loop
+against MIR's wrapping 16-bit semantics for every input, and against host C
+only for inputs whose computation stays in the int16 range (signed overflow
+is undefined in C, so a wrapped result is no claim about C).
 
 ## 8. Cost and timing model
 
@@ -190,7 +262,7 @@ Cycles and energy are accumulated separately (`instrbuf_price`):
   target;
 - **energy** comes from `cost_table.toml` categories (`SOURCES.md` cites each
   entry), plus the active-mode per-cycle energy for the opcodes the table
-  cannot express (`lpm`, `rjmp`, `break`).
+  cannot express (`lpm`, `rjmp`, `jmp`, `break`).
 
 No available source supports different energy for different instruction
 types within Active mode, so every table entry is `cycles x 2.8375 nJ`, a
@@ -206,9 +278,20 @@ exactly: taken `trip - 1` times, falling through once. Loops close as
 `dec / brne head` within BRNE's reach, or `dec / breq exit / rjmp head`
 beyond it. Trip counts are compile-time constants and no data-dependent
 branch exists in the workloads (DSP decisions are masks), so the prediction
-is exact. For generic MIR code with data-dependent branches, a segment's
-price is the cost of executing each emitted instruction once, which is not a
-path cost.
+is exact. For generic MIR, a single-block function executes each emitted
+instruction once, so its price is its execution cost. A function with
+branches gets only a **static** price -- each emitted instruction once,
+whatever path runs -- which is not an execution estimate: the reference
+function above prices at 134 cycles statically and executes in 328-329.
+`AvrMirCode.straight_line` and `AvrMirStaticCost.exact` say which case
+applies, and a caller may present the figures as predicted cycles or energy
+only when they are set. What a frontend can report today is code size,
+instruction count and those static figures. Path-sensitive costing is future
+work, and no energy-aware choice between codings of generic MIR exists (the
+candidate selection works on workload kernels, above MIR). The workload
+programs are single-block functions whose loops live inside priced target
+regions; `program.c` checks that invariantly, so their printed totals stay
+execution costs.
 
 What each printed total covers:
 
@@ -324,24 +407,43 @@ blocks and memory objects directly (`mir.h` states the contract): EDG node
 and type objects stay inside the adapter, nothing below MIR may include EDG
 headers, and constructs MIR does not model are rejected, not approximated.
 
-No adapter code exists in this repository.
+No adapter code exists in this repository. The adapter needs only
+`optifine_backend`: it builds a `MirModule`, then calls
+`avr_mir_build_program` and `avr_mir_emit_program`, which verify the module
+themselves.
+
+### Supported before EDG, and not
+
+Supported, verified and tested on the AVR interpreter (and, for the reference
+function and the long-branch programs, checked once in Avrora outside CI):
+one entry function with parameters and a return value; 8-, 16- and 32-bit
+integer constants, add, sub, and, or, xor, and multiply up to 16 bits;
+eq/ne/unsigned-less/signed-less compares; zero and sign extension and
+truncation; any CFG of blocks with `br`/`cbr`/`ret`, loops and merges, at
+any branch distance; stack and global objects with loads and stores;
+`addr`/`ptr_add` pointers into SRAM; read-only constants in program memory
+by direct access.
+
+Not supported: everything in the next list, plus storing or comparing
+pointer values and initialized globals.
 
 ### What the adapter work still needs below MIR
 
 - **Calls.** MIR has no call instruction and the backend no calling
-  convention or stack frames; entry functions are inlined by the wrapper and
-  `ret` falls through.
+  convention or stack frames; the entry function is inlined, `ret` falls
+  through, and parameters and the result use the research entry convention
+  above.
 - **Register allocation.** Unfolded values live in SRAM slots, reloaded per
   instruction. A real allocator belongs in the AVR backend.
 - **Address spaces.** C `const` data in flash needs a pointer type that knows
   it points into program memory; MIR's PTR is SRAM-only, and the backend
   refuses the address of a constant object.
 - **Wider arithmetic.** Multiplication above 16 bits, division, shifts.
-- **Long branches.** Block branches use `rjmp` (+/-2K words); larger
-  functions would need `jmp`.
-- **Path-sensitive cost.** Generic code is priced per emitted instruction;
-  costing code with data-dependent branches needs path or profile
-  information.
+- **Path-sensitive cost.** Code with branches gets only a static price (see
+  "Cost and timing model"); costing it needs path or profile information.
+- **Initialized and zeroed globals.** Programs start straight from reset with
+  no `.data` copy or `.bss` clear; a frontend must store initial values
+  explicitly, or the backend must gain startup code.
 
 ### Remaining coupling between the workloads and the AVR target
 

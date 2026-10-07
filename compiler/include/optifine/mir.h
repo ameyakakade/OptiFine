@@ -33,7 +33,10 @@
  * ---- Frontend contract (for the planned EDG IL adapter) ----
  *
  * A frontend builds a MirModule with this API and nothing else, calls
- * mir_verify, and hands the verified module to the backend. In particular:
+ * mir_verify for its own diagnostics, and hands the module to the backend
+ * through avr_mir_build_program (codegen/avr_mir.h), which verifies it again
+ * and refuses invalid MIR -- the backend never relies on the caller having
+ * verified. It links optifine_backend only. In particular:
  *   - No frontend type crosses this boundary. EDG IL nodes, types and
  *     headers stay inside the adapter; MIR and everything below it must
  *     build without them.
@@ -44,7 +47,10 @@
  *     the matching kind; the frontend never chooses an address.
  *   - What MIR does not yet model -- calls and a calling convention, address
  *     spaces for pointers into program memory, floating point, aggregates
- *     passed by value -- must be rejected by the adapter, not approximated.
+ *     passed by value, initialized globals -- must be rejected by the
+ *     adapter, not approximated. A program is one entry function under the
+ *     research entry convention in avr_mir.h (parameters and result at named
+ *     SRAM symbols), not a C ABI.
  * docs/ARCHITECTURE.md describes the boundary in full. */
 #ifndef OPTIFINE_MIR_H
 #define OPTIFINE_MIR_H

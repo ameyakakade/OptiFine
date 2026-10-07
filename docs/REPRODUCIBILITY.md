@@ -71,7 +71,9 @@ The retained captures ran from commit `0aace63`. A later compiler change that
 leaves every generated program byte-identical does not invalidate them. CI
 checks this for the naive, optimized and DSP programs on every change, and
 all 51 retained programs (those three plus the 48 periodic ones) were checked
-against the restructured compiler that introduced the MIR backend. A fresh
+against the restructured compiler that introduced the MIR backend, and again
+after the backend was closed for a C frontend (verifier hardening, the
+backend library split, long branches, the entry convention). A fresh
 capture still records a different compiler-binary hash. A change that alters a
 generated program needs the affected evidence recaptured, not edited.
 
