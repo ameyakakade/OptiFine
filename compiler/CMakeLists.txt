@@ -81,6 +81,7 @@ add_library(optifine_core STATIC
     src/codegen/registers.c
     src/codegen/select.c
     src/codegen/sram_layout.c
+    src/frontend/c_frontend.c
 )
 target_link_libraries(optifine_core PUBLIC optifine_backend)
 if(UNIX)
