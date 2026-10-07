@@ -14,38 +14,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "optifine/codegen/avr_instr.h"
 #include "optifine/codegen/reuse_analysis.h"
 #include "optifine/codegen/sram_layout.h"
 #include "optifine/cost_model.h"
 #include "optifine/ir.h"
-
-#define AVR_MAX_OPERANDS 3
-/* `mnemonic` holds the literal AVR opcode as emitted to .s (e.g. "muls",
- * "adc"), not a cost_table.toml key -- see codegen/cost_category.h for the
- * mapping from opcode to cost-table category. Longest current opcode is
- * "mulsu" (5 chars). */
-#define AVR_MNEMONIC_LEN 16
-/* Widened from 16 for the DSP path's symbolic program-memory operands:
- * "lo8(.Ltw+124)" does not fit 16 bytes, and snprintf truncates silently,
- * which produced a wrong-but-plausible address rather than an error. The
- * formatters now detect truncation outright; this keeps ordinary operands
- * comfortably inside the buffer. */
-#define AVR_OPERAND_LEN 24
-
-typedef struct {
-    char mnemonic[AVR_MNEMONIC_LEN];
-    char operands[AVR_MAX_OPERANDS][AVR_OPERAND_LEN];
-    int num_operands;
-} AvrInstr;
-
-typedef struct {
-    AvrInstr *instructions;
-    size_t num_instructions;
-    uint32_t cycles;    /* executed cycles, from the AVR timing table; not the selection criterion */
-    double energy_nj;   /* predicted (simulated-model) energy, from the cost table */
-} Candidate;
-
-void candidate_free(Candidate *candidate);
 
 /* Generates the candidate instruction sequences for graph->ops[op_id],
  * writing them into `out_candidates` (caller-allocated, capacity

@@ -11,23 +11,30 @@ add_library(optifine_test_settings INTERFACE)
 target_link_libraries(optifine_test_settings INTERFACE optifine_build_settings)
 target_compile_options(optifine_test_settings INTERFACE -UNDEBUG)
 
+# The interpreters and shared MIR programs need only the generic backend.
 add_library(optifine_test_support STATIC avr_interp.c mir_interp.c mir_programs.c)
 target_include_directories(optifine_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(optifine_test_support PUBLIC optifine_core optifine_test_settings)
+target_link_libraries(optifine_test_support PUBLIC optifine_backend optifine_test_settings)
 
-# optifine_add_test(<name> [ARGS <arg>...])
+# optifine_add_test(<name> [BACKEND_ONLY] [ARGS <arg>...])
 #   Builds <name>.c against optifine_core and the test support library and
-#   registers it with CTest.
+#   registers it with CTest. BACKEND_ONLY links optifine_backend instead of
+#   optifine_core: the test then also proves that what it exercises builds
+#   and links without the workload graph or its lowering.
 function(optifine_add_test name)
-    cmake_parse_arguments(T "" "" "ARGS" ${ARGN})
+    cmake_parse_arguments(T "BACKEND_ONLY" "" "ARGS" ${ARGN})
     add_executable(${name} ${name}.c)
     target_link_libraries(${name} PRIVATE optifine_test_support)
+    if(NOT T_BACKEND_ONLY)
+        target_link_libraries(${name} PRIVATE optifine_core)
+    endif()
     add_test(NAME ${name} COMMAND ${name} ${T_ARGS} WORKING_DIRECTORY ${OPTIFINE_REPO_ROOT})
 endfunction()
 
 optifine_add_test(test_ir)
-optifine_add_test(test_mir)
-optifine_add_test(test_avr_mir ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
+optifine_add_test(test_mir BACKEND_ONLY)
+optifine_add_test(test_avr_mir BACKEND_ONLY ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
+optifine_add_test(test_backend_link BACKEND_ONLY ARGS ${OPTIFINE_REPO_ROOT}/cost_table.toml)
 optifine_add_test(test_hir_to_mir ARGS
     ${OPTIFINE_REPO_ROOT}/models/tiny_classifier.onnx
     ${OPTIFINE_REPO_ROOT}/cost_table.toml)

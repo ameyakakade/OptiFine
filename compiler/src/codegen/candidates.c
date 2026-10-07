@@ -7,12 +7,6 @@
 #include "optifine/codegen/lower.h"
 #include "optifine/codegen/registers.h"
 
-void candidate_free(Candidate *candidate) {
-    free(candidate->instructions);
-    candidate->instructions = NULL;
-    candidate->num_instructions = 0;
-}
-
 /* Candidate 2 for OP_MATMUL: pre-loads the reused activation input
  * (inputs[0], read once per output channel -- N times total, see
  * reuse_analysis.h) into free registers ONCE, then reuses

@@ -8,6 +8,9 @@
 #include "optifine/codegen/select.h"
 #include "optifine/invariant.h"
 
+_Static_assert(SRAM_LAYOUT_BASE == AVR_MIR_SRAM_BASE && SRAM_LAYOUT_LIMIT == AVR_MIR_SRAM_LIMIT,
+               "the workload layout and the generic backend must agree on usable SRAM");
+
 #define MAX_CANDIDATES 4
 
 static void free_candidate_payload(void *payload) {

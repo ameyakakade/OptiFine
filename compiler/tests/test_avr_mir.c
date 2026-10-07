@@ -14,7 +14,6 @@
 #include "mir_programs.h"
 #include "optifine/codegen/avr_mir.h"
 #include "optifine/codegen/instr_buf.h"
-#include "optifine/codegen/sram_layout.h"
 
 static CostModel g_cm;
 
@@ -128,8 +127,8 @@ int main(int argc, char **argv) {
     AvrMirLayout layout;
     assert(avr_mir_layout_init(&m, &layout) == 0);
     uint16_t end = 0;
-    assert(avr_mir_layout_place_rest(&m, &layout, SRAM_LAYOUT_BASE, SRAM_LAYOUT_LIMIT, &end) == 0);
-    printf("  layout: objects and value slots in 0x%04X..0x%04X\n", SRAM_LAYOUT_BASE, end);
+    assert(avr_mir_layout_place_rest(&m, &layout, AVR_MIR_SRAM_BASE, AVR_MIR_SRAM_LIMIT, &end) == 0);
+    printf("  layout: objects and value slots in 0x%04X..0x%04X\n", AVR_MIR_SRAM_BASE, end);
 
     static const int64_t a32[] = {0, 1, 0x12345678, 0x7FFFFFFF, -1, -0x1000};
     for (size_t i = 0; i < 6; i++)
@@ -189,8 +188,8 @@ int main(int argc, char **argv) {
         assert(avr_mir_value_folded(&m, f, v));
         assert(avr_mir_layout_init(&m, &layout) == 0);
         layout.object_addr[g] = 0x0300; /* a caller-fixed address is kept */
-        assert(avr_mir_layout_place_rest(&m, &layout, SRAM_LAYOUT_BASE, SRAM_LAYOUT_LIMIT, &end) == 0);
-        assert(layout.value_slot[f][v] == 0 && end == SRAM_LAYOUT_BASE);
+        assert(avr_mir_layout_place_rest(&m, &layout, AVR_MIR_SRAM_BASE, AVR_MIR_SRAM_LIMIT, &end) == 0);
+        assert(layout.value_slot[f][v] == 0 && end == AVR_MIR_SRAM_BASE);
         AvrMirCode code;
         assert(avr_mir_select_function(&m, &layout, f, 0, &g_cm, &code) == 0);
         assert(code.count == 2 && code.segments[0].origin == 7 && code.segments[1].origin == 8);
@@ -225,7 +224,7 @@ int main(int argc, char **argv) {
         mir_ret(&m, g, e, mir_none());
         assert(mir_verify(&m, msg, sizeof(msg)) == 0);
         assert(avr_mir_layout_init(&m, &layout) == 0);
-        assert(avr_mir_layout_place_rest(&m, &layout, SRAM_LAYOUT_BASE, SRAM_LAYOUT_LIMIT, &end) == 0);
+        assert(avr_mir_layout_place_rest(&m, &layout, AVR_MIR_SRAM_BASE, AVR_MIR_SRAM_LIMIT, &end) == 0);
         AvrMirCode code;
         assert(avr_mir_select_function(&m, &layout, f, 0, &g_cm, &code) != 0 && code.count == 0);
         assert(avr_mir_select_function(&m, &layout, g, 0, &g_cm, &code) != 0 && code.count == 0);
@@ -238,7 +237,7 @@ int main(int argc, char **argv) {
     mir_module_init(&m);
     mir_add_object(&m, MIR_MEM_GLOBAL, 0x2000, "huge", MIR_NONE);
     assert(avr_mir_layout_init(&m, &layout) == 0);
-    assert(avr_mir_layout_place_rest(&m, &layout, SRAM_LAYOUT_BASE, SRAM_LAYOUT_LIMIT, &end) != 0);
+    assert(avr_mir_layout_place_rest(&m, &layout, AVR_MIR_SRAM_BASE, AVR_MIR_SRAM_LIMIT, &end) != 0);
     avr_mir_layout_free(&layout);
     mir_module_free(&m);
     printf("  refused: an object larger than SRAM\n");

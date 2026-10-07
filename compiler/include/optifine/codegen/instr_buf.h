@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include "optifine/codegen/candidates.h"
+#include "optifine/codegen/avr_instr.h"
 #include "optifine/cost_model.h"
 
 /* A statically bounded counted loop: instructions [first,last] execute

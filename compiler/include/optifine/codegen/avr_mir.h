@@ -50,11 +50,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "optifine/codegen/candidates.h"
+#include "optifine/codegen/avr_instr.h"
 #include "optifine/cost_model.h"
 #include "optifine/mir.h"
 
 #define AVR_MIR_PTR_BYTES 2
+
+/* The ATmega128 SRAM the backend may place objects and values in: from
+ * 0x0200 (clear of the 0x0100 start of internal SRAM, as the workload layout
+ * keeps it) up to, not including, 0x1100, the end of internal SRAM. The
+ * workload layout (sram_layout.h) uses the same bounds. */
+#define AVR_MIR_SRAM_BASE 0x0200
+#define AVR_MIR_SRAM_LIMIT 0x1100
 
 typedef struct {
     uint16_t *object_addr;  /* per object; 0 = not yet placed (CONST objects stay 0) */

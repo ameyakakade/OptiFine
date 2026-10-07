@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 
-#include "optifine/codegen/candidates.h"
+#include "optifine/codegen/avr_instr.h"
 
 /* One assembly unit (one .s file). Every candidate emitted into the same
  * unit shares its label namespace: candidate-local loop labels are renumbered

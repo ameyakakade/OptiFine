@@ -35,27 +35,38 @@ if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     endif()
 endif()
 
-# The compiler proper, everything except the command-line driver. A static
-# library rather than an object library: a test that substitutes one of its
-# own definitions for a library function (test_periodic) links only the
-# archive members it actually needs.
+# The generic AVR backend: MIR, its verifier, AVR selection from MIR,
+# instruction pricing and assembly emission. It knows nothing of the workload
+# graph (ir.h) or its lowering, and a frontend that builds MIR links this
+# alone (tests/test_backend_link checks that it stays so).
+add_library(optifine_backend STATIC
+    src/cost_model.c
+    src/emit.c
+    src/invariant.c
+    src/mir/mir.c
+    src/mir/mir_verify.c
+    src/codegen/avr_instr.c
+    src/codegen/avr_mir.c
+    src/codegen/cost_category.c
+    src/codegen/instr_buf.c
+)
+target_link_libraries(optifine_backend PUBLIC optifine_build_settings)
+
+# The workload compiler, everything except the command-line driver: the ONNX
+# and DSP frontends, the workload graph, its lowering and translation to MIR,
+# and program assembly, on top of the backend. A static library rather than
+# an object library: a test that substitutes one of its own definitions for a
+# library function (test_periodic) links only the archive members it actually
+# needs.
 add_library(optifine_core STATIC
     src/ir.c
     src/ir_verify.c
     src/pb_reader.c
     src/ingest.c
     src/dsp_build.c
-    src/cost_model.c
-    src/emit.c
-    src/invariant.c
-    src/mir/mir.c
-    src/mir/mir_verify.c
-    src/codegen/avr_mir.c
     src/codegen/candidates.c
-    src/codegen/cost_category.c
     src/codegen/dsp32.c
     src/codegen/hir_to_mir.c
-    src/codegen/instr_buf.c
     src/codegen/lower.c
     src/codegen/lower_dsp.c
     src/codegen/lower_fft.c
@@ -70,7 +81,7 @@ add_library(optifine_core STATIC
     src/codegen/select.c
     src/codegen/sram_layout.c
 )
-target_link_libraries(optifine_core PUBLIC optifine_build_settings)
+target_link_libraries(optifine_core PUBLIC optifine_backend)
 if(UNIX)
     # glibc/musl keep cos/lround/llround in libm; MSVC's CRT provides them
     # without a separate library.

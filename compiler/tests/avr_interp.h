@@ -14,7 +14,7 @@
 
 #include <stdint.h>
 
-#include "optifine/codegen/candidates.h"
+#include "optifine/codegen/avr_instr.h"
 
 /* Sized to cover the largest address compiler/src/codegen/sram_layout.h's
  * SRAM_LAYOUT_LIMIT allows (0x1100) -- addresses are used directly as
