@@ -28,7 +28,12 @@ void frontend_c_error_and_exit(stb_lexer lex) {
     printf("\nError at %d:%d\n", loc.line_number, loc.line_offset);
 }
 
-void frontend_c_parse_args(CompilerState *s) { return; }
+void frontend_c_parse_args(CompilerState *s) {
+    printf("Parsing args: ");
+    stb_c_lexer_print_token(&s->lex);
+    printf(" \n");
+    return;
+}
 
 void frontend_c_expect_and_get_next_token(CompilerState *s, int token_type) {
     if (!frontend_c_expect_next_token(s->lex, token_type)) frontend_c_error_and_exit(s->lex);
@@ -75,7 +80,7 @@ void frontend_c_compile_file(CompilerState* s) {
     char* identifier = strdup(s->lex.string);
 
     if (!frontend_c_expect_next_token(s->lex, '(')) {
-        printf("Global var with type %s and name %s\nParsing is yet not implemented.", type, identifier);
+        printf("Global var with type '%s' and name '%s'\nParsing is yet not implemented.", type, identifier);
         return;
     }
     stb_c_lexer_get_token(&s->lex);
@@ -83,7 +88,7 @@ void frontend_c_compile_file(CompilerState* s) {
     frontend_c_expect_and_get_next_token(s, ')');
 
     if (!frontend_c_expect_next_token(s->lex, '{')) {
-        printf("Function declaration with type %s and name %s\n", type, identifier);
+        printf("Function declaration with type '%s' and name '%s'\n", type, identifier);
         return;
     }
     stb_c_lexer_get_token(&s->lex);
