@@ -1,7 +1,7 @@
 # Literature Survey and Positioning
 
 This document places OptiFine's two contributions against the prior work it
-either **competes against** or **proving-correct**, and states precisely how
+either **competes against** or **corroborates**, and states precisely how
 each comparison is drawn. It also records OptiFine's central contention with
 the recent TinyML energy literature.
 
@@ -134,9 +134,9 @@ allowed to leave Active mode.
 
 | Ref. | Contribution | Layer | Target | Guarantee | Validation | What to compare (axis) |
 |---|---|---|---|---|---|---|
-| **Huang & Ghiasi**, ACM TODAES 12(3) Art. 27, 2007 (doi:10.1145/1255456.1255464) | Compiler-inserted power-mode switches with **deadline guarantees** via static analysis | compiler | ARM (65 nm), DVS+ABB | deadline | analytic + sim | Mechanism identity (statically guaranteed mode switch minimizing energy); % saving (~33%) vs. OptiFine's duty-cycle saving |
+| **Huang & Ghiasi**, ACM TODAES 12(3) Art. 27, 2007 (doi:10.1145/1255456.1255464) | Compiler-inserted power-mode switches with **deadline guarantees** via static analysis | compiler | DVS+ABB processor model (XScale-derived parameters, 65 nm) | deadline | analytic + sim | Mechanism identity (statically guaranteed mode switch minimizing energy); 33.20% average vs. no frequency scaling and 22.97% vs. DVS-only at 65 nm (abstract). Note: the paper's results section reports 14.3% vs. baseline at 65 nm, which is inconsistent with its abstract. Cite the abstract figure and name the baseline. Compare vs. OptiFine's duty-cycle saving |
 | **Hsu & Kremer**, PLDI 2003 | Compiler DVS where slack exists | compiler | VLIW/RISC | — | analytic | "saving scales with slack/idle" — the analytic ancestor of `saving ~= idle_fraction` |
-| **Wanner et al.**, DATE 2011 (doi:10.1109/DATE.2011.5763133) | Duty-cycling scheduling to save energy | **OS/RTOS** (TinyOS/FreeRTOS, real boards) | MSP430-class | — | hardware | Layer (OS vs. OptiFine's compiler); adaptive vs. OptiFine's static compile-time; 3–22x active-time reduction vs. OptiFine's % idle-fraction saving; sleep-cost-ratio insight |
+| **Wanner et al.**, DATE 2011 (doi:10.1109/DATE.2011.5763031) | Duty-cycling scheduling to save energy | **OS/RTOS** (TinyOS) | Atmel SAM3U (Cortex-M3) | — | measured chip variation + Avrora simulation | Layer (OS vs. OptiFine's compiler); adaptive vs. OptiFine's static compile-time; sleep-cost-ratio insight. Also profiles its scheduler in Avrora, a useful methodological link to OptiFine |
 | **Maeng & Lucia** (CatNap), PLDI 2020 | Feasibility/schedule validation for intermittent energy | scheduling | ARM/FRAM | feasibility test | hardware | Scheduling philosophy (feasibility check before run) vs. OptiFine's static deadline rejection |
 | **AVR42787 / sleep-mode app notes** (Microchip/Atmel) | Sleep modes + RTC/asynchronous wake mechanism | firmware | AVR | — | hardware | Engineering baseline for the mechanism (must be cited as prior art) |
 
@@ -175,7 +175,7 @@ project.
 | Ref. | Contribution | Target | Reported result | Why it matters / what to compare |
 |---|---|---|---|---|
 | **Surakka et al.**, Proc. Estonian Acad. Sci. Eng. 11(4):347-357, 2005 (doi:10.3176/eng.2005.4.07) | Instruction/register-order selection for energy | **8-bit AVR (AT90S8515)** | ~0.5% savings | The only prior instruction-level-energy work on an AVR; closest head-to-head for active-mode optimization. Reproduce their register-order experiment on ATmega128 and compare vs. OptiFine's ~1.83% on the same ISA family. |
-| **Lee, Tiwari, Malik, Fujita**, IEEE TVLSI 5(3), 1997 (doi:10.1109/92.555992) | Instruction-selection-by-energy scheduling | DSP | 26–73% (scheduling) | The canonical "select instructions by energy" paper. Mechanism ancestor of active-mode optimization, though on a DSP with more scheduling freedom. Corollary: per-ISA savings are not portable. |
+| **Lee, Tiwari, Malik, Fujita**, IEEE TVLSI 5(1):123-135, 1997 (doi:10.1109/92.555992) | Instruction-selection-by-energy scheduling | DSP | 26–73% (scheduling) | The canonical "select instructions by energy" paper. Mechanism ancestor of active-mode optimization, though on a DSP with more scheduling freedom. Corollary: per-ISA savings are not portable. |
 | **Tiwari, Malik, Wolfe**, IEEE TVLSI 2(4), 1994 (doi:10.1109/92.335012) | Instruction-level power model | embedded RISC/CISC | — | **Proving-correct**: `cost_table.toml` and the whole methodology descend from this. OptiFine confirms (on AVR) that instruction *cycle count* dominates energy when no per-opcode current variation is available to cited sources. |
 | **Pallister et al.**, arXiv:1303.6485 | GCC-flag energy search | ARM | best flag is not portable | Supports OptiFine's per-ISA calibration stance; argues against exporting savings numbers across toolchains. |
 
@@ -191,7 +191,7 @@ TinyML result would be technically false and is deliberately not done here.
 | Ref. | Claim OptiFine corroborates |
 |---|---|
 | **Titzer, Lee, Palsberg**, IPSN 2005 (doi:10.1109/IPSN.2005.1440978) | Observes tiny networked-sensor programs sleep ~96–99% of the time — the *reason* the scheduling duty-cycle saving is large; OptiFine's 96.3% saving at prescaler 1024 matches this regime. |
-| **Xie et al.**, PLDI 2008 | Analytic limit of compile-time mode scheduling — OptiFine's `saving ~= 0.984 x idle_fraction` sits within this bound. |
+| **Xie, Martonosi, Malik**, PLDI 2003 (doi:10.1145/781131.781138) | Analytic opportunities and limits of compile-time voltage scheduling. Supports the slack-scaling argument behind `saving ~= 0.984 x idle_fraction` by analogy (DVS, not sleep states). |
 | **Tiwari et al.** 1994 (as above) | Per-instruction cycle-count energy methodology. |
 | **Pallister et al.** 2013 (as above) | Savings are not portable across ISA/toolchain — OptiFine's refusal to extrapolate a single number across platforms follows this. |
 
@@ -207,15 +207,16 @@ TinyML result would be technically false and is deliberately not done here.
    Article 27, 2007. doi:10.1145/1255456.1255464
 3. C.-H. Hsu and U. Kremer, "The design, implementation, and evaluation of a
    compiler algorithm for CPU energy reduction," PLDI 2003.
-4. L. Wanner et al., "Variability-aware duty cycle scheduling in low power
-   embedded systems," DATE 2011. doi:10.1109/DATE.2011.5763133
+4. L. Wanner, R. Balani, S. Zahedi, C. Apte, P. Gupta, M. Srivastava,
+   "Variability-aware duty cycle scheduling in long running embedded
+   sensing systems," DATE 2011. doi:10.1109/DATE.2011.5763031
 5. K. Maeng and B. Lucia, "Adaptive low-overhead scheduling for periodic and
    reactive intermittent execution" (CatNap), PLDI 2020.
 6. V. Tiwari, S. Malik, A. Wolfe, "Power analysis of embedded software: a
    first step towards software power minimization," IEEE TVLSI 2(4), 1994.
    doi:10.1109/92.335012
 7. M. Lee, V. Tiwari, S. Malik, M. Fujita, "Power analysis and minimization
-   techniques for embedded DSP software," IEEE TVLSI 5(3), 1997.
+   techniques for embedded DSP software," IEEE TVLSI 5(1), 123-135, 1997.
    doi:10.1109/92.555992
 8. K. Surakka, T. Mikkonen, H.-M. Jarvinen, T. Vuorela, J. Vanhala,
    "Towards Compiler Backend Optimization for Low Energy Consumption at
@@ -239,3 +240,6 @@ TinyML result would be technically false and is deliberately not done here.
     *semantics*, not for energy: this project's per-cycle constants come
     from Avrora's model (SOURCES.md), not from the datasheet's electrical
     characteristics tables.
+14. F. Xie, M. Martonosi, S. Malik, "Compile-time dynamic voltage scaling
+    settings: Opportunities and limits," PLDI 2003, 49-62.
+    doi:10.1145/781131.781138
